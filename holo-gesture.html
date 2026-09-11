@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>HOLO FORGE / 全息手势交互</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%;overflow:hidden;background:#03040a;
+    font-family:"SF Mono",Consolas,"Roboto Mono",monospace;color:#bfe9ff;-webkit-tap-highlight-color:transparent}
+  body.glitch{filter:contrast(1.35) saturate(1.4) hue-rotate(6deg)}
+  #gl{position:fixed;inset:0;z-index:1}
+  #cam{position:fixed;left:0;top:0;width:100%;height:100%;object-fit:cover;z-index:0;
+    transform:scaleX(-1);opacity:0;transition:opacity .5s;filter:contrast(1.12) saturate(.92) brightness(.82)}
+  #cam.on{opacity:.62}
+  #skel{position:fixed;inset:0;width:100%;height:100%;z-index:3;pointer-events:none}
+  #grid{position:fixed;inset:0;z-index:2;pointer-events:none;opacity:.42;
+    background-image:linear-gradient(rgba(57,230,255,.16) 1px,transparent 1px),
+                     linear-gradient(90deg,rgba(57,230,255,.16) 1px,transparent 1px);
+    background-size:46px 46px;
+    -webkit-mask-image:radial-gradient(circle at 50% 50%,#000 20%,transparent 76%);
+    mask-image:radial-gradient(circle at 50% 50%,#000 20%,transparent 76%);
+    animation:drift 22s linear infinite}
+  @keyframes drift{to{background-position:46px 46px,46px 46px}}
+  #vign{position:fixed;inset:0;z-index:4;pointer-events:none;
+    background:radial-gradient(ellipse at 50% 50%,transparent 42%,rgba(3,4,10,.82) 100%)}
+  #scan{position:fixed;inset:0;z-index:5;pointer-events:none;
+    background:repeating-linear-gradient(180deg,rgba(120,220,255,.055) 0 1px,transparent 1px 4px)}
+  #noise{position:fixed;inset:0;z-index:6;pointer-events:none;opacity:.05;mix-blend-mode:screen;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='4'/></filter><rect width='140' height='140' filter='url(%23n)'/></svg>")}
+  #hud{position:fixed;z-index:8;top:calc(20px + env(safe-area-inset-top));left:22px;pointer-events:none;letter-spacing:.16em}
+  #hud h1{font-size:13px;font-weight:700;color:#eafcff;text-shadow:0 0 16px rgba(57,230,255,.9)}
+  #hud .sub{margin-top:5px;font-size:9px;color:#4d7fa8;letter-spacing:.2em}
+  #state{margin-top:13px;font-size:11px;color:#7cf0d0;text-shadow:0 0 14px rgba(60,240,200,.7)}
+  #meta{margin-top:6px;font-size:9px;color:#5c7fa8;display:flex;gap:12px}
+  #bin{position:fixed;z-index:8;right:22px;top:calc(20px + env(safe-area-inset-top));text-align:right;
+    font-size:10px;color:#ff7ad0;letter-spacing:.16em;pointer-events:none;
+    text-shadow:0 0 14px rgba(255,92,200,.85);word-break:break-all;max-width:44vw}
+  #bin .lbl{color:#39e6ff;font-size:9px;display:block;margin-bottom:4px}
+  #dock{position:fixed;z-index:9;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));
+    transform:translateX(-50%);display:flex;gap:10px;flex-wrap:wrap;justify-content:center;padding:0 12px}
+  button{font-family:inherit;font-size:11px;letter-spacing:.14em;padding:12px 20px;border-radius:9px;
+    color:#dcf6ff;background:linear-gradient(180deg,rgba(20,60,110,.72),rgba(10,22,44,.86));
+    border:1px solid rgba(57,230,255,.45);cursor:pointer;transition:.24s;backdrop-filter:blur(10px);
+    text-shadow:0 0 10px rgba(57,230,255,.5)}
+  button:hover{background:linear-gradient(180deg,rgba(30,110,190,.8),rgba(14,36,70,.9));
+    box-shadow:0 0 24px rgba(57,230,255,.55);border-color:rgba(255,92,200,.6)}
+  button:disabled{opacity:.45;cursor:default}
+  #guide{position:fixed;z-index:8;right:22px;bottom:calc(20px + env(safe-area-inset-bottom));
+    width:250px;font-size:10px;line-height:1.9;color:#8fc4e8;
+    background:rgba(6,14,28,.6);border:1px solid rgba(57,230,255,.24);
+    border-radius:11px;padding:13px 16px;backdrop-filter:blur(12px);pointer-events:none}
+  #guide b{color:#eafcff}#guide .k{color:#39e6ff}#guide .p{color:#ff7ad0}
+  #err{position:fixed;z-index:12;left:50%;top:50%;transform:translate(-50%,-50%);max-width:430px;
+    padding:22px 26px;border-radius:13px;background:rgba(28,6,20,.94);
+    border:1px solid rgba(255,92,200,.55);color:#ffd0ea;font-size:12px;line-height:1.75;
+    display:none;text-align:center;box-shadow:0 0 40px rgba(255,60,160,.35)}
+  @media (max-width:820px){
+    #guide{display:none}#bin{font-size:9px;max-width:38vw}#hud{left:14px}
+    button{padding:10px 15px;font-size:10px}}
+  @media (orientation:portrait){#bin{max-width:34vw;font-size:8px}}
+</style>
+</head>
+<body>
+<video id="cam" playsinline muted autoplay></video>
+<canvas id="gl"></canvas>
+<div id="grid"></div>
+<canvas id="skel"></canvas>
+<div id="vign"></div><div id="scan"></div><div id="noise"></div>
+<div id="hud">
+  <h1>HOLO FORGE</h1>
+  <div class="sub">AR HAND TRACKING / 21 LANDMARKS / WEBGL</div>
+  <div id="state">STANDBY</div>
+  <div id="meta"><span id="hands">HANDS: 0</span><span id="fps">FPS --</span></div>
+</div>
+<div id="bin"><span class="lbl">DATA STREAM</span>0101011010010110</div>
+<div id="guide">
+  <b>手势交互</b><br>
+  <span class="k">捏合</span> 拇指+食指 → 生成全息几何体<br>
+  <span class="k">再捏合</span> 切换 菱形 / 三角 / 六边形<br>
+  <span class="p">张开手掌</span> → 图形放大展开<br>
+  <span class="p">握拳</span> → 粒子消散<br>
+  <span class="k">移动手掌</span> → 拖动全息体
+</div>
+<div id="dock">
+  <button id="start">启用摄像头</button>
+  <button id="shapeBtn">切换几何体</button>
+  <button id="demo">演示模式</button>
+</div>
+<div id="err"></div>
+<script type="importmap">
+{"imports":{
+  "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+<script type="module">
+
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+
+const $ = s => document.querySelector(s);
+const video = $('#cam'), skel = $('#skel'), sctx = skel.getContext('2d');
+const stateEl = $('#state'), handsEl = $('#hands'), binEl = $('#bin');
+const CYAN = '#39e6ff', PINK = '#ff5cc8';
+
+/* ---------------- 渲染器 ---------------- */
+const renderer = new THREE.WebGLRenderer({ canvas: $('#gl'), antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 200);
+camera.position.set(0, 0, 9);
+
+scene.add(new THREE.AmbientLight(0x223355, 1.4));
+const key = new THREE.DirectionalLight(0x9fd8ff, 2.4); key.position.set(5, 7, 6); scene.add(key);
+const pCyan = new THREE.PointLight(0x39e6ff, 60, 40); pCyan.position.set(-5, -2, 4); scene.add(pCyan);
+const pPink = new THREE.PointLight(0xff3fa0, 60, 40); pPink.position.set(5, 3, 4); scene.add(pPink);
+const pViolet = new THREE.PointLight(0x8a3cff, 40, 36); pViolet.position.set(0, 5, -4); scene.add(pViolet);
+
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 1.35, 0.85, 0.16);
+composer.addPass(bloom);
+
+/* ---------------- 全息材质 ---------------- */
+function holo(cA, cB, cEdge) {
+  return new THREE.ShaderMaterial({
+    transparent: true, side: THREE.DoubleSide, depthWrite: false,
+    uniforms: {
+      uA: { value: new THREE.Color(cA) }, uB: { value: new THREE.Color(cB) },
+      uE: { value: new THREE.Color(cEdge) }, uT: { value: 0 },
+      uOpen: { value: 0 }, uFade: { value: 1 }
+    },
+    vertexShader: 'varying vec3 vN;varying vec3 vV;varying vec3 vP;varying float vY;' +
+      'void main(){vec4 wp=modelMatrix*vec4(position,1.0);vN=normalize(mat3(modelMatrix)*normal);' +
+      'vV=normalize(cameraPosition-wp.xyz);vP=position;vY=position.y;' +
+      'gl_Position=projectionMatrix*viewMatrix*wp;}',
+    fragmentShader: 'uniform vec3 uA;uniform vec3 uB;uniform vec3 uE;uniform float uT;uniform float uOpen;uniform float uFade;' +
+      'varying vec3 vN;varying vec3 vV;varying vec3 vP;varying float vY;' +
+      'void main(){vec3 N=normalize(vN);vec3 V=normalize(vV);' +
+      'float fres=pow(1.0-clamp(dot(N,V),0.0,1.0),2.2);' +
+      'float band=smoothstep(-1.0,1.0,vY+sin(vP.x*4.0+uT*1.2)*0.25);' +
+      'band=mix(band,fract(vY*1.8+uT*0.3),uOpen*0.5);' +
+      'vec3 base=mix(uA,uB,band);' +
+      'float grid=step(0.94,fract(vP.x*6.0))*step(0.94,fract(vP.y*6.0));' +
+      'vec3 col=base*(0.5+fres*0.9)+uE*(fres*1.5+grid*0.6);' +
+      'float edge=smoothstep(0.72,1.0,fres);' +
+      'col+=uE*edge*1.1;' +
+      'gl_FragColor=vec4(col,clamp(0.34+fres*0.75,0.0,1.0)*uFade);}'
+  });
+}
+
+const MAT = {
+  gem: holo(0x2fd8ff, 0xff3fa0, 0x9ff0ff),
+  hex: holo(0x39e6ff, 0x8a3cff, 0x7cf0ff),
+  tri: holo(0x7c4dff, 0xff2f8a, 0xffb0ff)
+};
+
+/* 形变几何体：同一份顶点在 菱形/三角/六边形 之间切换 */
+function crystalGeometry() {
+  const g = new THREE.OctahedronGeometry(1, 2);
+  const pos = g.attributes.position;
+  g.userData.base = Float32Array.from(pos.array);
+  return g;
+}
+function shapeTarget(kind, v) {
+  const x = v.x, y = v.y, z = v.z;
+  if (kind === 'tri') {
+    const k = (y + 1) / 2;
+    return [x * (1 - k) * 1.25, y * 1.05, z * 0.6 + Math.sin((x + y) * 3) * 0.05];
+  }
+  if (kind === 'hex') {
+    const r = Math.hypot(x, z) || 1e-4, a = Math.atan2(z, x);
+    const step = Math.PI / 3;
+    const q = Math.round(a / step) * step;
+    const k = Math.cos(a - q) || 1e-4;
+    const rr = (r / k) * 1.15;
+    return [rr * Math.cos(q), y * 0.75, rr * Math.sin(q)];
+  }
+  return [x, y, z];
+}
+
+function buildCrystal() {
+  const geo = crystalGeometry();
+  const mesh = new THREE.Mesh(geo, MAT.gem);
+  const wire = new THREE.LineSegments(
+    new THREE.WireframeGeometry(new THREE.OctahedronGeometry(1.004, 0)),
+    new THREE.LineBasicMaterial({ color: 0x9ff0ff, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending })
+  );
+  const halo = new THREE.Mesh(new THREE.RingGeometry(1.5, 1.54, 96),
+    new THREE.MeshBasicMaterial({ color: 0x39e6ff, transparent: true, opacity: 0.7, side: THREE.DoubleSide, blending: THREE.AdditiveBlending }));
+  const halo2 = new THREE.Mesh(new THREE.RingGeometry(1.72, 1.735, 96),
+    new THREE.MeshBasicMaterial({ color: 0xff3fa0, transparent: true, opacity: 0.5, side: THREE.DoubleSide, blending: THREE.AdditiveBlending }));
+  const g = new THREE.Group();
+  g.add(mesh, wire, halo, halo2);
+  g.userData = { geo, mesh, wire, halo, halo2, kind: 'gem', morph: 1, base: 'gem' };
+  return g;
+}
+
+/* ---------------- 粒子消散 ---------------- */
+const PMAX = 900;
+const pGeo = new THREE.BufferGeometry();
+const pPos = new Float32Array(PMAX * 3);
+const pCol = new Float32Array(PMAX * 3);
+const pVel = new Float32Array(PMAX * 3);
+const pLife = new Float32Array(PMAX);
+pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
+pGeo.setAttribute('color', new THREE.BufferAttribute(pCol, 3));
+const points = new THREE.Points(pGeo, new THREE.PointsMaterial({
+  size: 0.075, vertexColors: true, transparent: true, opacity: 0.95,
+  depthWrite: false, blending: THREE.AdditiveBlending
+}));
+scene.add(points);
+let pHead = 0;
+function burst(center, count, spread) {
+  for (let i = 0; i < count; i++) {
+    const k = pHead++ % PMAX, i3 = k * 3;
+    pPos[i3] = center.x + (Math.random() - 0.5) * spread;
+    pPos[i3 + 1] = center.y + (Math.random() - 0.5) * spread;
+    pPos[i3 + 2] = center.z + (Math.random() - 0.5) * spread;
+    const s = 0.055 + Math.random() * 0.14;
+    pVel[i3] = (Math.random() - 0.5) * s * 2.4;
+    pVel[i3 + 1] = (Math.random() - 0.2) * s * 2.4;
+    pVel[i3 + 2] = (Math.random() - 0.5) * s * 1.6;
+    const t = Math.random();
+    pCol[i3] = 0.2 + t * 0.8; pCol[i3 + 1] = 0.9 - t * 0.5; pCol[i3 + 2] = 1.0;
+    pLife[k] = 1;
+  }
+}
+function updateParticles(dt) {
+  for (let k = 0; k < PMAX; k++) {
+    if (pLife[k] <= 0) continue;
+    const i3 = k * 3;
+    pPos[i3] += pVel[i3]; pPos[i3 + 1] += pVel[i3 + 1]; pPos[i3 + 2] += pVel[i3 + 2];
+    pVel[i3] *= 0.985; pVel[i3 + 1] = pVel[i3 + 1] * 0.985 + 0.00035; pVel[i3 + 2] *= 0.985;
+    pLife[k] -= dt * 0.75;
+    if (pLife[k] <= 0) { pPos[i3] = 9e9; pPos[i3 + 1] = 9e9; pPos[i3 + 2] = 9e9; }
+  }
+  pGeo.attributes.position.needsUpdate = true;
+  pGeo.attributes.color.needsUpdate = true;
+}
+
+/* ---------------- 二进制代码环 ---------------- */
+function makeBinChip(text, color) {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 64;
+  const g = c.getContext('2d');
+  g.clearRect(0, 0, 256, 64);
+  g.font = '700 40px Consolas, monospace';
+  g.fillStyle = color; g.shadowColor = color; g.shadowBlur = 18;
+  g.fillText(text, 8, 46);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  return new THREE.Mesh(new THREE.PlaneGeometry(0.92, 0.23),
+    new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+}
+function buildBinRing() {
+  const g = new THREE.Group();
+  const n = 14, R = 2.28;
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2;
+    const txt = Array.from({ length: 7 }, () => (Math.random() < 0.5 ? '0' : '1')).join('');
+    const chip = makeBinChip(txt, i % 2 ? CYAN : PINK);
+    chip.position.set(Math.cos(a) * R, Math.sin(a) * R, 0);
+    chip.userData.a = a; chip.userData.r = R; chip.userData.txt = txt;
+    g.add(chip);
+  }
+  const lineGeo = new THREE.BufferGeometry();
+  const lp = [];
+  for (let i = 0; i < 96; i++) {
+    const a1 = (i / 96) * Math.PI * 2, a2 = ((i + 1) / 96) * Math.PI * 2;
+    lp.push(Math.cos(a1) * R, Math.sin(a1) * R, 0, Math.cos(a2) * R, Math.sin(a2) * R, 0);
+  }
+  lineGeo.setAttribute('position', new THREE.Float32BufferAttribute(lp, 3));
+  g.add(new THREE.LineSegments(lineGeo, new THREE.LineBasicMaterial({
+    color: 0x39e6ff, transparent: true, opacity: 0.32, blending: THREE.AdditiveBlending })));
+  const connectors = new THREE.LineSegments(new THREE.BufferGeometry(),
+    new THREE.LineBasicMaterial({ color: 0xff5cc8, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending }));
+  const cp = [];
+  for (let i = 0; i < n; i += 2) {
+    const a = (i / n) * Math.PI * 2, a2 = ((i + 1) / n) * Math.PI * 2;
+    cp.push(Math.cos(a) * R, Math.sin(a) * R, 0, Math.cos(a2) * R, Math.sin(a2) * R, 0);
+  }
+  connectors.geometry.setAttribute('position', new THREE.Float32BufferAttribute(cp, 3));
+  g.add(connectors);
+  return g;
+}
+
+/* ---------------- 漂浮 01 粒子背景 ---------------- */
+function buildFloatBits() {
+  const g = new THREE.Group();
+  const n = 90;
+  for (let i = 0; i < n; i++) {
+    const chip = makeBinChip(Math.random() < 0.5 ? '0' : '1', Math.random() < 0.5 ? CYAN : PINK);
+    chip.scale.setScalar(0.34 + Math.random() * 0.3);
+    chip.position.set((Math.random() - 0.5) * 36, (Math.random() - 0.5) * 22, -6 - Math.random() * 16);
+    chip.userData.sp = 0.12 + Math.random() * 0.5;
+    chip.material.opacity = 0.22 + Math.random() * 0.4;
+    chip.material.transparent = true;
+    g.add(chip);
+  }
+  return g;
+}
+
+/* ---------------- 状态 ---------------- */
+const world = new THREE.Group(); scene.add(world);
+const crystal = buildCrystal(); crystal.visible = false; world.add(crystal);
+const binRing = buildBinRing(); binRing.visible = false; crystal.add(binRing);
+const bits = buildFloatBits(); scene.add(bits);
+
+let targetPos = new THREE.Vector3();
+let curPos = new THREE.Vector3();
+let targetScale = 1, curScale = 1;
+let targetOpen = 0, curOpen = 0;
+let fade = 1, targetFade = 1;
+let palm = null, lastSeen = 0, active = false;
+let shape = 'gem', nextShape = 0, shapeAt = 0;
+let pinchLatched = false;
+const SHAPES = ['gem', 'tri', 'hex'];
+
+const BONES = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],
+  [9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+const TIPS = [4, 8, 12, 16, 20];
+
+const d2 = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+const scaleOf = lm => d2(lm[0], lm[9]) || 0.1;
+const pinchOf = lm => d2(lm[4], lm[8]) / scaleOf(lm);
+const isFist = lm => { const p = lm[9], r = scaleOf(lm); return [8,12,16,20].every(i => d2(lm[i], p) < r * 1.18); };
+const isOpen = lm => { const p = lm[9], r = scaleOf(lm); return [8,12,16,20].filter(i => d2(lm[i], p) > r * 1.9).length >= 4; };
+
+function setShape(kind) {
+  shape = kind;
+  crystal.userData.base = kind;
+  crystal.userData.morph = 0;
+  const g = crystal.userData.geo;
+  const base = g.userData.base, pos = g.attributes.position;
+  if (!g.userData.to) g.userData.to = new Float32Array(base.length);
+  for (let i = 0; i < pos.count; i++) {
+    const v = new THREE.Vector3(base[i * 3], base[i * 3 + 1], base[i * 3 + 2]);
+    const t = shapeTarget(kind, v);
+    g.userData.to[i * 3] = t[0]; g.userData.to[i * 3 + 1] = t[1]; g.userData.to[i * 3 + 2] = t[2];
+  }
+}
+
+function show(on) {
+  if (on && !active) { crystal.visible = true; binRing.visible = true; targetFade = 1; fade = 0; }
+  if (!on && active) {
+    burst(curPos, 320, 1.7);
+    targetFade = 0;
+  }
+  active = on;
+}
+
+function vanish() {
+  if (active) burst(curPos, 380, 1.9);
+  active = false; crystal.visible = false; binRing.visible = false; fade = 0; targetFade = 0;
+}
+
+function onHands(list) {
+  const now = performance.now();
+  handsEl.textContent = 'HANDS: ' + list.length;
+  if (!list.length) {
+    if (now - lastSeen > 300) vanish();
+    return;
+  }
+  lastSeen = now;
+  const lm = list[0];
+  palm = lm[9];
+
+  if (isFist(lm)) {
+    stateEl.textContent = 'FIST / 粒子消散';
+    pinchLatched = false; vanish(); return;
+  }
+  const p = pinchOf(lm);
+
+  if (isOpen(lm)) {
+    show(true);
+    stateEl.textContent = 'OPEN / 展开放大';
+    targetOpen = 1;
+    targetScale = 1.5;
+  } else if (p < 0.75) {
+    if (!pinchLatched) { pinchLatched = true; shapeAt = now; nextShape = (nextShape + 1) % 3; setShape(SHAPES[nextShape]); }
+    show(true);
+    stateEl.textContent = 'PINCH / ' + shape.toUpperCase();
+    targetOpen = 0.18;
+    targetScale = THREE.MathUtils.clamp(1.45 - d2(lm[4], lm[8]) * 4.4, 0.6, 2.4);
+  } else if (p > 1.0) {
+    pinchLatched = false;
+    if (active) { stateEl.textContent = 'PINCH / ' + shape.toUpperCase(); targetOpen = 0.3; targetScale = 1; }
+  }
+
+  if (active) {
+    targetPos.set((0.5 - palm.x) * 13, (0.5 - palm.y) * 8, (0.5 - (palm.z || 0)) * 4);
+  }
+}
+
+/* ---------------- 骨架叠加 ---------------- */
+function drawSkeleton(list) {
+  const r = skel.getBoundingClientRect();
+  const W = Math.round(r.width * 2), H = Math.round(r.height * 2);
+  if (skel.width !== W || skel.height !== H) { skel.width = W; skel.height = H; }
+  sctx.clearRect(0, 0, skel.width, skel.height);
+  if (!list.length) return;
+  const pt = p => ({ x: (1 - p.x) * skel.width, y: p.y * skel.height });
+  sctx.lineCap = 'round';
+  for (const lm of list) {
+    sctx.strokeStyle = 'rgba(57,230,255,.92)';
+    sctx.shadowColor = 'rgba(57,230,255,.95)'; sctx.shadowBlur = 14; sctx.lineWidth = 3.4;
+    for (const [i, j] of BONES) {
+      const A = pt(lm[i]), B = pt(lm[j]);
+      sctx.beginPath(); sctx.moveTo(A.x, A.y); sctx.lineTo(B.x, B.y); sctx.stroke();
+    }
+    sctx.shadowBlur = 0;
+    sctx.fillStyle = 'rgba(57,230,255,.85)';
+    for (let i = 0; i < lm.length; i++) {
+      if (TIPS.includes(i)) continue;
+      const q = pt(lm[i]);
+      sctx.beginPath(); sctx.arc(q.x, q.y, 2.4, 0, Math.PI * 2); sctx.fill();
+    }
+    for (const i of TIPS) {
+      const q = pt(lm[i]);
+      sctx.shadowColor = 'rgba(255,92,200,1)'; sctx.shadowBlur = 20;
+      sctx.fillStyle = 'rgba(255,92,200,.98)';
+      sctx.beginPath(); sctx.arc(q.x, q.y, 5.2, 0, Math.PI * 2); sctx.fill();
+      sctx.strokeStyle = 'rgba(255,190,235,.95)'; sctx.lineWidth = 1.6;
+      sctx.beginPath(); sctx.arc(q.x, q.y, 8.6, 0, Math.PI * 2); sctx.stroke();
+    }
+    sctx.shadowBlur = 0;
+  }
+}
+
+/* ---------------- 主循环 ---------------- */
+const clock = new THREE.Clock();
+let binTick = 0;
+function loop() {
+  requestAnimationFrame(loop);
+  const dt = Math.min(clock.getDelta(), 0.05), t = clock.getElapsedTime();
+  if (demo) demoStep(dt);
+
+  curPos.lerp(targetPos, 1 - Math.pow(0.001, dt * 2.4));
+  curScale += (targetScale - curScale) * Math.min(1, dt * 9);
+  curOpen += (targetOpen - curOpen) * Math.min(1, dt * 7);
+  fade += (targetFade - fade) * Math.min(1, dt * 8);
+
+  world.position.copy(curPos);
+  world.scale.setScalar(curScale);
+
+  const u = crystal.userData;
+  u.mesh.material.uniforms.uT.value = t;
+  u.mesh.material.uniforms.uOpen.value = curOpen;
+  u.mesh.material.uniforms.uFade.value = fade;
+  u.mesh.material.opacity = fade;
+
+  if (u.morph < 1) {
+    u.morph = Math.min(1, u.morph + dt * 3.4);
+    const base = u.geo.userData.base, to = u.geo.userData.to, pos = u.geo.attributes.position;
+    const k = u.morph < 0.5 ? 2 * u.morph * u.morph : 1 - Math.pow(-2 * u.morph + 2, 2) / 2;
+    for (let i = 0; i < pos.count * 3; i++) pos.array[i] = base[i] + (to[i] - base[i]) * k;
+    pos.needsUpdate = true;
+    u.geo.computeVertexNormals();
+  }
+
+  const spin = 0.22 + curOpen * 0.5;
+  u.mesh.rotation.y = t * spin; u.mesh.rotation.x = Math.sin(t * 0.5) * 0.25;
+  u.wire.rotation.copy(u.mesh.rotation);
+  u.wire.scale.setScalar(1 + curOpen * 0.55);
+  u.halo.rotation.z = t * 0.6; u.halo2.rotation.z = -t * 0.4;
+  u.halo.scale.setScalar(1 + curOpen * 1.1); u.halo2.scale.setScalar(1 + curOpen * 1.35);
+  u.halo.material.opacity = 0.55 * fade; u.halo2.material.opacity = 0.4 * fade;
+
+  binRing.rotation.z = -t * 0.35;
+  binRing.children.forEach((c, i) => {
+    if (c.userData.r === undefined) return;
+    const a = c.userData.a + t * 0.35;
+    c.position.set(Math.cos(a) * c.userData.r, Math.sin(a) * c.userData.r, 0);
+    c.material.opacity = fade * (0.55 + 0.45 * Math.sin(t * 3 + i));
+  });
+  binTick += dt;
+  if (binTick > 0.5) {
+    binTick = 0;
+    binRing.children.forEach((c, i) => {
+      if (c.userData.r === undefined || i % 3) return;
+      const txt = Array.from({ length: 7 }, () => (Math.random() < 0.5 ? '0' : '1')).join('');
+      const old = c.material.map;
+      const chip = makeBinChip(txt, i % 2 ? CYAN : PINK);
+      c.material.map = chip.material.map; c.material.needsUpdate = true;
+      chip.material.map.dispose(); old.dispose();
+    });
+    binEl.textContent = Array.from({ length: 16 }, () => (Math.random() < 0.5 ? '0' : '1')).join('');
+  }
+
+  bits.children.forEach((c, i) => {
+    c.position.y += c.userData.sp * dt;
+    if (c.position.y > 12) c.position.y = -12;
+    c.position.x += Math.sin(t * 0.3 + i) * dt * 0.12;
+  });
+
+  updateParticles(dt);
+  pCyan.position.x = -5 + Math.sin(t * 0.7) * 1.1;
+  pPink.position.y = 3 + Math.cos(t * 0.6) * 1.1;
+  composer.render();
+}
+loop();
+
+/* ---------------- 摄像头 ---------------- */
+const errEl = $('#err');
+function fail(m) { errEl.textContent = m; errEl.style.display = 'block'; }
+
+async function start() {
+  const b = $('#start');
+  b.disabled = true; b.textContent = '正在启动...';
+  stateEl.textContent = '请求摄像头权限';
+  try {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('unsupported');
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: 1280, height: 720 }, audio: false });
+    video.srcObject = stream; await video.play();
+    video.classList.add('on');
+    stateEl.textContent = '加载手部模型';
+    const vision = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/+esm');
+    const fs2 = await vision.FilesetResolver.forVisionTasks(
+      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm');
+    const landmarker = await vision.HandLandmarker.createFromOptions(fs2, {
+      baseOptions: {
+        modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
+        delegate: 'GPU'
+      },
+      runningMode: 'VIDEO', numHands: 2,
+      minHandDetectionConfidence: 0.5, minTrackingConfidence: 0.5, minHandPresenceConfidence: 0.5
+    });
+    b.textContent = '摄像头已启用';
+    stateEl.textContent = 'IDLE / 把手放进画面';
+    let prev = -1, fps = 0, fAt = performance.now();
+    const tick = () => {
+      requestAnimationFrame(tick);
+      if (video.readyState < 2) return;
+      const now = performance.now();
+      if (now - prev < 26) return;
+      prev = now;
+      let list = [];
+      try { list = landmarker.detectForVideo(video, now).landmarks || []; } catch (e) { return; }
+      onHands(list);
+      drawSkeleton(list);
+      fps++;
+      if (now - fAt > 1000) { $('#fps').textContent = 'FPS ' + fps; fps = 0; fAt = now; }
+    };
+    tick();
+  } catch (e) {
+    console.error(e);
+    b.disabled = false; b.textContent = '重试摄像头';
+    if (e.name === 'NotAllowedError') fail('摄像头权限被拒绝。请点击地址栏左侧的摄像头图标，把权限改为“允许”，然后刷新页面。');
+    else if (e.name === 'NotFoundError') fail('未检测到摄像头设备，请检查设备连接。');
+    else if (e.message === 'unsupported') fail('当前浏览器不支持摄像头，请使用 Chrome 或 Edge。');
+    else fail('启动失败：' + (e.name || e.message) + '。可点击“演示模式”先看效果。');
+    stateEl.textContent = 'CAMERA ERROR / DEMO READY';
+  }
+}
+
+/* ---------------- 演示模式 ---------------- */
+let demo = false, demoT = 0;
+function demoStep(dt) {
+  demoT += dt;
+  const cyc = demoT % 18;
+  if (cyc < 4.5) { if (!active) { setShape('gem'); show(true); } targetOpen = 0.2; targetScale = 1.15; stateEl.textContent = 'DEMO / 捏合 · 菱形'; }
+  else if (cyc < 8) { if (shape !== 'tri') setShape('tri'); show(true); targetOpen = 0.35; targetScale = 1.3; stateEl.textContent = 'DEMO / 捏合 · 三角形'; }
+  else if (cyc < 11.5) { if (shape !== 'hex') setShape('hex'); show(true); targetOpen = 0.4; targetScale = 1.4; stateEl.textContent = 'DEMO / 捏合 · 六边形'; }
+  else if (cyc < 15) { show(true); targetOpen = 1; targetScale = 1.85; stateEl.textContent = 'DEMO / 张开手掌 · 展开'; }
+  else { if (active) { burst(curPos, 380, 1.9); active = false; crystal.visible = false; binRing.visible = false; } stateEl.textContent = 'DEMO / 握拳 · 粒子消散'; }
+  targetPos.set(Math.sin(demoT * 0.55) * 2.1, Math.cos(demoT * 0.8) * 1.05, 0);
+  handsEl.textContent = 'HANDS: demo';
+}
+
+$('#start').addEventListener('click', start);
+$('#demo').addEventListener('click', () => {
+  demo = !demo;
+  $('#demo').textContent = demo ? '停止演示' : '演示模式';
+  if (!demo) { vanish(); stateEl.textContent = 'STANDBY'; }
+});
+$('#shapeBtn').addEventListener('click', () => {
+  nextShape = (nextShape + 1) % 3;
+  setShape(SHAPES[nextShape]);
+  if (!active) show(true);
+  stateEl.textContent = 'MANUAL / ' + shape.toUpperCase() + ' · ' + (nextShape + 1) + '/3';
+});
+addEventListener('pointerdown', () => { if (demo && active) burst(curPos, 140, 1.2); });
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  composer.setSize(innerWidth, innerHeight);
+  bloom.setSize(innerWidth, innerHeight);
+});
+setShape('gem');
+</script>
+</body>
+</html>
