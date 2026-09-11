@@ -133,6 +133,7 @@
   <button id="pick">载入我的视频</button>
   <button id="start">启用摄像头</button>
   <button id="demoVideo">示例视频</button>
+  <button id="exitFull" style="display:none">退出全屏</button>
 </div>
 <input id="file" type="file" accept="video/*" style="display:none">
 
@@ -172,6 +173,8 @@ const BONES = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,
 let mode = 'idle';            // idle | point | rect | full
 let reveal = 0, targetReveal = 0;   // 0..1 洞的张开度
 let fullMix = 0, targetFull = 0;    // 0..1 全屏混合
+let locked = false;                 // 全屏后锁定，停止手势交互
+let lockedAt = 0;
 let rect = { x: 0, y: 0, w: 0, h: 0, cx: 0, cy: 0, ang: 0 };
 let smoothRect = null;
 let pointPos = null;           // 单点（握指手）
@@ -375,6 +378,11 @@ function setState(txt, hint, cls) {
 /* ---------- 手势主逻辑 ---------- */
 function onHands(list) {
   const now = performance.now();
+  // 已全屏：忽略一切手势，保持视频播放
+  if (locked) {
+    handsEl.textContent = 'HANDS: 已停止';
+    return;
+  }
   handsEl.textContent = 'HANDS: ' + list.length;
   if (!list.length) {
     if (now - lastSeen > 350) {
@@ -422,9 +430,14 @@ function onHands(list) {
     // 洞占屏比例 → 决定 reveal 与全屏
     const area = (rect.w * rect.h) / (skel.width * skel.height);
     targetReveal = Math.min(1, area * 9);
-    targetFull = area > 0.62 ? 1 : 0;
+    // 撑满屏幕面积的 80% 时进入全屏，并锁定（不再响应手势）
+    if (area >= 0.80 && !locked) {
+      locked = true; lockedAt = now;
+      targetFull = 1; targetReveal = 1;
+      setState('FULL / 全屏播放中', '手势交互已停止 — 点“退出全屏”返回', 'full');
+    }
 
-    if (targetFull > 0.5) setState('FULL / 全屏播放', '矩形撑满镜头 — 视频接管', 'full');
+    if (locked) setState('FULL / 全屏播放中', '手势交互已停止 — 点“退出全屏”返回', 'full');
     else setState('RECT / 抠洞', '食指与拇指构成矩形 — 透过它看视频', 'live');
     return;
   }
@@ -494,8 +507,10 @@ async function start() {
       prev = now;
       let list = [];
       try { list = landmarker.detectForVideo(cam, now).landmarks || []; } catch (e) { return; }
-      onHands(list);
-      drawSkeleton(list, mode === 'point');
+      if (!locked) {
+        onHands(list);
+        drawSkeleton(list, mode === 'point');
+      }
       fps++;
       if (now - fAt > 1000) { $('#fps').textContent = 'FPS ' + fps; fps = 0; fAt = now; }
     };
@@ -541,6 +556,14 @@ $('#demoVideo').addEventListener('click', () => {
 
 $('#start').addEventListener('click', start);
 
+$('#exitFull').addEventListener('click', () => {
+  locked = false; lockedAt = 0;
+  targetFull = 0; targetReveal = 0;
+  fullMix = 0; reveal = 0;
+  $('#exitFull').style.display = 'none';
+  setState('READY / 就绪', '双手食指+拇指比出矩形，撑满镜头 80% 后全屏播放', 'ok');
+});
+
 /* ---------- 渲染循环 ---------- */
 function loop() {
   requestAnimationFrame(loop);
@@ -549,8 +572,15 @@ function loop() {
   fullMix = lerp(fullMix, targetFull, 0.08);
   $('#fullbar').style.opacity = fullMix > 0.05 ? 1 : 0;
   $('#fullbar').querySelector('.fill2').style.width = Math.round(fullMix * 100) + '%';
+  $('#fullbar').querySelector('.lbl').textContent = locked ? 'FULLSCREEN / 手势已停止' : 'FULLSCREEN PROGRESS (80%)';
+  const ex = $('#exitFull');
+  if (ex) ex.style.display = locked ? 'inline-block' : 'none';
   renderMask();
-  drawSkeleton(lastList, mode === 'point');
+  if (locked) {
+    if (skel.width) sctx.clearRect(0, 0, skel.width, skel.height);
+  } else {
+    drawSkeleton(lastList, mode === 'point');
+  }
 }
 let lastList = [];
 const _onHands = onHands;
