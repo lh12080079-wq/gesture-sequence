@@ -778,7 +778,7 @@ async function start() {
     if (e.name === 'NotAllowedError') fail('摄像头权限被拒绝。请点击地址栏左侧的摄像头图标，把权限改为“允许”，然后刷新页面。');
     else if (e.name === 'NotFoundError') fail('未检测到摄像头设备，请检查设备连接。');
     else if (e.message === 'unsupported') fail('当前浏览器不支持摄像头，请使用 Chrome 或 Edge。');
-    else fail('启动失败：' + (e.name || e.message) + '。可点击“演示模式”先看效果。');
+    else fail('启动失败：' + (e.name || '') + ' / ' + (e.message || '') + ' / @' + ((e.stack || '').split('\n')[1] || 'nostack').trim() + '。可点击“演示模式”先看效果。');
     stateEl.textContent = 'CAMERA ERROR / DEMO READY';
     setCamState('启动失败', 'bad');
   }
