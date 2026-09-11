@@ -407,6 +407,8 @@ function buildCardModel() {
 }
 
 let targetCardSpin = 0;
+let demo = false, demoT = 0;
+let palmHas = false;
 const card = buildCardModel(); card.visible = false;
 
 /* ---------------- 手掌中心光晕 ---------------- */
@@ -423,7 +425,7 @@ function buildPalmGlow() {
   return g;
 }
 const palmGlow = buildPalmGlow(); scene.add(palmGlow);
-let palmTarget = new THREE.Vector3(), palmHas = false;
+const palmTarget = new THREE.Vector3();
 
 function updatePalmGlow(dt, t) {
   const want = palmHas && !card.visible ? 1 : 0;
@@ -783,7 +785,6 @@ async function start() {
 }
 
 /* ---------------- 演示模式 ---------------- */
-let demo = false, demoT = 0;
 function demoStep(dt) {
   demoT += dt;
   const cyc = demoT % 18;
