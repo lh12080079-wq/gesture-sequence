@@ -406,7 +406,8 @@ function buildCardModel() {
   return g;
 }
 
-const card = buildCardModel(); card.visible = false; world.add(card);
+let targetCardSpin = 0;
+const card = buildCardModel(); card.visible = false;
 
 /* ---------------- 手掌中心光晕 ---------------- */
 function buildPalmGlow() {
@@ -454,7 +455,6 @@ function updateCard(dt, t) {
   u.face.material.opacity = card.visible ? 1 : 0;
   u.face.material.transparent = true;
 }
-let targetCardSpin = 0;
 
 /* ---------------- HUD 与中央大字 ---------------- */
 const camStateEl = $('#camState'), handStateEl = $('#handState'), gestStateEl = $('#gestState');
@@ -480,6 +480,7 @@ function setCamState(text, cls) { camStateEl.textContent = text; camStateEl.clas
 
 /* ---------------- 状态 ---------------- */
 const world = new THREE.Group(); scene.add(world);
+world.add(card);
 const crystal = buildCrystal(); crystal.visible = false; world.add(crystal);
 const binRing = buildBinRing(); binRing.visible = false; crystal.add(binRing);
 const bits = buildFloatBits(); scene.add(bits);
