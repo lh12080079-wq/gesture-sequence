@@ -724,6 +724,30 @@ function loop() {
 }
 loop();
 
+/* ---------------- MediaPipe 多 CDN 加载 ---------------- */
+const VISION_SOURCES = [
+  { js: 'https://fastly.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/+esm',
+    wasm: 'https://fastly.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm' },
+  { js: 'https://unpkg.com/@mediapipe/tasks-vision@0.10.22/+esm',
+    wasm: 'https://unpkg.com/@mediapipe/tasks-vision@0.10.22/wasm' },
+  { js: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/+esm',
+    wasm: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm' }
+];
+let VISION_WASM = VISION_SOURCES[0].wasm;
+async function loadVision() {
+  let lastErr = null;
+  for (const src of VISION_SOURCES) {
+    try {
+      const mod = await import(/* @vite-ignore */ src.js);
+      if (mod && mod.HandLandmarker && mod.FilesetResolver) {
+        VISION_WASM = src.wasm;
+        return mod;
+      }
+    } catch (e) { lastErr = e; }
+  }
+  throw new Error('无法加载 MediaPipe（已尝试 ' + VISION_SOURCES.length + ' 个 CDN）：' + (lastErr && lastErr.message ? lastErr.message : 'unknown'));
+}
+
 /* ---------------- 摄像头 ---------------- */
 const errEl = $('#err');
 function fail(m) { errEl.textContent = m; errEl.style.display = 'block'; }
@@ -739,12 +763,12 @@ async function start() {
       video: { facingMode: 'user', width: 1280, height: 720 }, audio: false });
     video.srcObject = stream; await video.play();
     video.classList.add('on');
-    setCamState('已开启', 'ok');
+    setCamState('摄像头已开', 'ok');
+    setHandState(0);
     setHud('IDLE', '✋', 'HOLO FORGE', '把手放进画面');
     stateEl.textContent = '加载手部模型';
-    const vision = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/+esm');
-    const fs2 = await vision.FilesetResolver.forVisionTasks(
-      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm');
+    const vision = await loadVision();
+    const fs2 = await vision.FilesetResolver.forVisionTasks(VISION_WASM);
     const landmarker = await vision.HandLandmarker.createFromOptions(fs2, {
       baseOptions: {
         modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
