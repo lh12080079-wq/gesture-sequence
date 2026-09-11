@@ -726,12 +726,14 @@ loop();
 
 /* ---------------- MediaPipe 多 CDN 加载 ---------------- */
 const VISION_SOURCES = [
-  { js: 'https://fastly.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/+esm',
-    wasm: 'https://fastly.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm' },
-  { js: 'https://unpkg.com/@mediapipe/tasks-vision@0.10.22/+esm',
-    wasm: 'https://unpkg.com/@mediapipe/tasks-vision@0.10.22/wasm' },
-  { js: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/+esm',
-    wasm: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm' }
+  { js: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/vision_bundle.mjs',
+    wasm: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm' },
+  { js: 'https://fastly.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/vision_bundle.mjs',
+    wasm: 'https://fastly.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm' },
+  { js: 'https://unpkg.com/@mediapipe/tasks-vision@0.10.18/vision_bundle.mjs',
+    wasm: 'https://unpkg.com/@mediapipe/tasks-vision@0.10.18/wasm' },
+  { js: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs',
+    wasm: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm' }
 ];
 let VISION_WASM = VISION_SOURCES[0].wasm;
 async function loadVision() {
