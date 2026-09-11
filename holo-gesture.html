@@ -736,11 +736,17 @@ const VISION_SOURCES = [
     wasm: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm' }
 ];
 let VISION_WASM = VISION_SOURCES[0].wasm;
+function withTimeout(p, ms) {
+  return Promise.race([
+    p,
+    new Promise((_, rej) => setTimeout(() => rej(new Error('timeout ' + ms + 'ms')), ms))
+  ]);
+}
 async function loadVision() {
   let lastErr = null;
   for (const src of VISION_SOURCES) {
     try {
-      const mod = await import(/* @vite-ignore */ src.js);
+      const mod = await withTimeout(import(/* @vite-ignore */ src.js), 9000);
       if (mod && mod.HandLandmarker && mod.FilesetResolver) {
         VISION_WASM = src.wasm;
         return mod;
@@ -771,14 +777,14 @@ async function start() {
     stateEl.textContent = '加载手部模型';
     const vision = await loadVision();
     const fs2 = await vision.FilesetResolver.forVisionTasks(VISION_WASM);
-    const landmarker = await vision.HandLandmarker.createFromOptions(fs2, {
+    const landmarker = await withTimeout(vision.HandLandmarker.createFromOptions(fs2, {
       baseOptions: {
         modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
         delegate: 'GPU'
       },
       runningMode: 'VIDEO', numHands: 2,
       minHandDetectionConfidence: 0.5, minTrackingConfidence: 0.5, minHandPresenceConfidence: 0.5
-    });
+    }), 30000);
     b.textContent = '摄像头已启用';
     setCamState('实时追踪中', 'live');
     setHud('IDLE', '✋', 'HOLO FORGE', '捏合 · 张开 · 握拳 · 双手靠近');
