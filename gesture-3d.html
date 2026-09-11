@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>GESTURE FORGE / 手势几何体</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%;overflow:hidden;background:#04060c;
+    font-family:"SF Mono",Consolas,"Roboto Mono",monospace;color:#cfe4ff}
+  #scene,#grid{position:fixed;inset:0}
+  #scene{z-index:1}
+  #grid{z-index:2;pointer-events:none;opacity:.5;
+    background-image:linear-gradient(rgba(60,120,220,.13) 1px,transparent 1px),
+                     linear-gradient(90deg,rgba(60,120,220,.13) 1px,transparent 1px);
+    background-size:42px 42px;mask-image:radial-gradient(circle at 50% 50%,#000 25%,transparent 78%);
+    -webkit-mask-image:radial-gradient(circle at 50% 50%,#000 25%,transparent 78%)}
+  #noise{z-index:3;position:fixed;inset:0;pointer-events:none;opacity:.06;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3'/></filter><rect width='120' height='120' filter='url(%23n)'/></svg>")}
+  #scan{z-index:4;position:fixed;inset:0;pointer-events:none;
+    background:repeating-linear-gradient(180deg,rgba(120,200,255,.05) 0 1px,transparent 1px 4px)}
+  #cam{position:fixed;z-index:5;left:18px;bottom:18px;width:230px;height:172px;
+    object-fit:cover;border-radius:10px;transform:scaleX(-1);
+    border:1px solid rgba(120,190,255,.35);box-shadow:0 0 26px rgba(40,110,220,.35);
+    opacity:.82;transition:opacity .3s,transform .3s}
+  #cam.off{opacity:0;transform:scaleX(-1) scale(.86);pointer-events:none}
+  #skeleton{position:fixed;z-index:6;left:18px;bottom:18px;width:230px;height:172px;pointer-events:none;border-radius:10px}
+  #hud{position:fixed;z-index:7;top:22px;left:24px;pointer-events:none;letter-spacing:.14em}
+  #hud h1{font-size:13px;font-weight:600;color:#eaf3ff;text-shadow:0 0 14px rgba(90,160,255,.85)}
+  #hud .sub{margin-top:6px;font-size:10px;color:#5d80b8}
+  #state{margin-top:14px;font-size:11px;color:#7cf0d0;text-shadow:0 0 12px rgba(60,240,200,.6)}
+  #hands{margin-top:6px;font-size:10px;color:#6d8fc4}
+  #coords{position:fixed;z-index:7;top:22px;right:24px;text-align:right;font-size:10px;color:#ff8ab8;
+    letter-spacing:.1em;pointer-events:none;text-shadow:0 0 12px rgba(255,70,140,.55)}
+  #dock{position:fixed;z-index:8;left:50%;bottom:22px;transform:translateX(-50%);display:flex;gap:10px}
+  button{font-family:inherit;font-size:11px;letter-spacing:.12em;padding:11px 20px;border-radius:8px;
+    color:#dceaff;background:linear-gradient(180deg,rgba(40,80,150,.6),rgba(18,30,60,.75));
+    border:1px solid rgba(120,190,255,.4);cursor:pointer;transition:.22s;backdrop-filter:blur(8px)}
+  button:hover{background:linear-gradient(180deg,rgba(60,120,220,.75),rgba(24,44,90,.85));
+    box-shadow:0 0 22px rgba(70,150,255,.5)}
+  button:disabled{opacity:.45;cursor:default}
+  #guide{position:fixed;z-index:7;right:24px;bottom:18px;width:262px;font-size:10px;line-height:1.85;
+    color:#8fb0dd;background:rgba(8,16,32,.55);border:1px solid rgba(90,150,240,.25);
+    border-radius:10px;padding:14px 16px;backdrop-filter:blur(10px);pointer-events:none}
+  #guide b{color:#eaf3ff;font-weight:600}
+  #guide .k{color:#7cf0d0}
+  #err{position:fixed;z-index:9;left:50%;top:50%;transform:translate(-50%,-50%);max-width:420px;
+    padding:22px 26px;border-radius:12px;background:rgba(30,8,16,.92);border:1px solid rgba(255,90,140,.5);
+    color:#ffc2d8;font-size:12px;line-height:1.7;display:none;text-align:center}
+  @media (max-width:760px){
+    #cam,#skeleton{width:132px;height:99px;left:12px;bottom:78px}
+    #hud{top:14px;left:14px}#coords{top:14px;right:14px;font-size:9px}
+    #guide{display:none}#dock{bottom:14px}button{padding:9px 14px;font-size:10px}}
+</style>
+</head>
+<body>
+<canvas id="scene"></canvas>
+<div id="grid"></div><div id="noise"></div><div id="scan"></div>
+<video id="cam" class="off" playsinline muted></video>
+<canvas id="skeleton"></canvas>
+
+<div id="hud">
+  <h1>GESTURE FORGE</h1>
+  <div class="sub">WEBGL / MEDIAPIPE HANDS / 21 LANDMARKS</div>
+  <div id="state">STANDBY</div>
+  <div id="hands">HANDS: 0</div>
+</div>
+<div id="coords">1210100<br><span id="vec">0.00 0.00 0.00</span></div>
+
+<div id="guide">
+  <b>手势说明</b><br>
+  <span class="k">捏合</span> 拇指+食指 → 生成菱形<br>
+  <span class="k">张手</span> 五指展开 → 多层渐变 + 坐标标注<br>
+  <span class="k">双手捏合</span> → 卡片 / 图片<br>
+  <span class="k">握拳</span> → 清除全部模型<br>
+  <span class="k">移动手掌</span> → 拖动模型 · 捏合距离控制缩放
+</div>
+
+<div id="dock"><button id="start">启用摄像头</button><button id="demo">演示模式</button></div>
+<div id="err"></div>
+
+<script type="importmap">
+{"imports":{
+  "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+
+const $ = s => document.querySelector(s);
+const stateEl = $('#state'), handsEl = $('#hands'), vecEl = $('#vec');
+const video = $('#cam'), skel = $('#skeleton'), sctx = skel.getContext('2d');
+
+/* ---------- 渲染器 ---------- */
+const renderer = new THREE.WebGLRenderer({ canvas: $('#scene'), antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x04060c, 0.055);
+
+const camera = new THREE.PerspectiveCamera(52, innerWidth / innerHeight, 0.1, 120);
+camera.position.set(0, 0.4, 7.2);
+
+scene.add(new THREE.AmbientLight(0x3355aa, 1.1));
+const key = new THREE.DirectionalLight(0x88bbff, 2.1); key.position.set(4, 6, 5); scene.add(key);
+const rimA = new THREE.PointLight(0xff2f6d, 42, 26); rimA.position.set(-4.5, -2, 3); scene.add(rimA);
+const rimB = new THREE.PointLight(0x4b6bff, 42, 26); rimB.position.set(4.5, 2, -3); scene.add(rimB);
+const rimC = new THREE.PointLight(0xb14bff, 26, 24); rimC.position.set(0, -3.4, -1.5); scene.add(rimC);
+
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 1.15, 0.72, 0.18);
+composer.addPass(bloom);
+
+const group = new THREE.Group(); scene.add(group);
+const starGeo = new THREE.BufferGeometry();
+const starPos = new Float32Array(1400 * 3);
+for (let i = 0; i < starPos.length; i++) starPos[i] = (Math.random() - 0.5) * 70;
+starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+const stars = new THREE.Points(starGeo, new THREE.PointsMaterial({
+  color: 0x5b8cff, size: 0.055, transparent: true, opacity: 0.55, depthWrite: false }));
+scene.add(stars);
+
+/* ---------- 材质工具 ---------- */
+function iridescent(a, b, c) {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uA: { value: new THREE.Color(a) }, uB: { value: new THREE.Color(b) }, uC: { value: new THREE.Color(c) },
+      uTime: { value: 0 }, uGlow: { value: 1.0 }, uOpen: { value: 0 }
+    },
+    vertexShader: `
+      varying vec3 vN; varying vec3 vV; varying vec3 vP; varying float vY;
+      void main(){
+        vec4 wp = modelMatrix * vec4(position,1.0);
+        vN = normalize(mat3(modelMatrix) * normal);
+        vV = normalize(cameraPosition - wp.xyz);
+        vP = position; vY = position.y;
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }`,
+    fragmentShader: `
+      uniform vec3 uA; uniform vec3 uB; uniform vec3 uC;
+      uniform float uTime; uniform float uGlow; uniform float uOpen;
+      varying vec3 vN; varying vec3 vV; varying vec3 vP; varying float vY;
+      void main(){
+        vec3 N = normalize(vN); vec3 V = normalize(vV);
+        float fres = pow(1.0 - clamp(dot(N,V),0.0,1.0), 2.4);
+        float metal = 0.34 + 0.66 * pow(clamp(dot(N, normalize(vec3(0.6,0.85,0.5))),0.0,1.0), 2.0);
+        float band = smoothstep(-0.9, 0.9, vY + sin(vP.x*3.2 + uTime*0.85)*0.28);
+        band = mix(band, fract(vY*1.6 + uTime*0.22), uOpen*0.55);
+        vec3 base = mix(uA, uB, band);
+        base = mix(base, uC, fres*0.95);
+        vec3 col = base * metal * uGlow + fres * uC * 1.25;
+        col += uC * fres * 0.55;
+        gl_FragColor = vec4(col, 1.0);
+      }`
+  });
+}
+
+function gridTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = '#0a1730'; g.fillRect(0, 0, 256, 256);
+  g.strokeStyle = 'rgba(120,200,255,.55)'; g.lineWidth = 1.4;
+  for (let i = 0; i <= 256; i += 32) {
+    g.beginPath(); g.moveTo(i, 0); g.lineTo(i, 256); g.stroke();
+    g.beginPath(); g.moveTo(0, i); g.lineTo(256, i); g.stroke();
+  }
+  g.fillStyle = 'rgba(180,230,255,.85)'; g.font = '600 52px monospace';
+  g.fillText('1210100', 26, 140);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+
+/* ---------- 模型构建 ---------- */
+const GEM = iridescent(0xff2f6d, 0x4b6bff, 0xb14bff);
+const LAYER = [0xff2f6d, 0xff6b3d, 0xb14bff, 0x4b6bff, 0x35e0ff].map(c => iridescent(c, 0x4b6bff, 0xb14bff));
+const CARD = iridescent(0x2f6bff, 0xb14bff, 0x35e0ff);
+
+const models = { gem: null, layers: null, card: null, layersInner: [] };
+
+function buildGem() {
+  const g = new THREE.Group();
+  const octa = new THREE.Mesh(new THREE.OctahedronGeometry(1, 0), GEM);
+  const wire = new THREE.Mesh(new THREE.OctahedronGeometry(1.02, 0), new THREE.MeshBasicMaterial({
+    color: 0x9fd0ff, wireframe: true, transparent: true, opacity: 0.42 }));
+  const tetra = new THREE.Mesh(new THREE.TetrahedronGeometry(0.62, 0), new THREE.MeshBasicMaterial({
+    color: 0xff8ab8, wireframe: true, transparent: true, opacity: 0.6 }));
+  const halo = new THREE.Mesh(new THREE.RingGeometry(1.45, 1.5, 72), new THREE.MeshBasicMaterial({
+    color: 0xff5c9e, transparent: true, opacity: 0.5, side: THREE.DoubleSide }));
+  g.add(octa, wire, tetra, halo);
+  g.userData = { octa, wire, tetra, halo };
+  return g;
+}
+
+function buildLayers() {
+  const g = new THREE.Group();
+  const inners = [];
+  for (let i = 0; i < 5; i++) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.075, 2.5), LAYER[i]);
+    m.userData.targetY = (i - 2) * 0.56;
+    m.userData.rot = i * 0.22;
+    m.userData.base = i * 0.22;
+    g.add(m); inners.push(m);
+  }
+  const f = new THREE.Mesh(new THREE.BoxGeometry(2.72, 0.03, 2.72), new THREE.MeshBasicMaterial({
+    color: 0x8fd8ff, wireframe: true, transparent: true, opacity: 0.32 }));
+  f.userData.targetY = 1.42; f.userData.base = 0.4; g.add(f); inners.push(f);
+  const txt = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 2.2), new THREE.MeshBasicMaterial({
+    map: gridTexture(), transparent: true, opacity: 0.92, side: THREE.DoubleSide }));
+  txt.position.y = 0.02; txt.rotation.x = -Math.PI / 2; txt.userData.targetY = 0.02; txt.userData.base = 0.2;
+  g.add(txt); inners.push(txt);
+  g.userData.inners = inners;
+  return g;
+}
+
+function buildCard() {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(3, 1.9, 0.07), CARD);
+  const edge = new THREE.Mesh(new THREE.BoxGeometry(3.08, 1.98, 0.05), new THREE.MeshBasicMaterial({
+    color: 0x9fd0ff, wireframe: true, transparent: true, opacity: 0.4 }));
+  const pic = new THREE.Mesh(new THREE.PlaneGeometry(2.82, 1.72), new THREE.MeshBasicMaterial({
+    color: 0x0a1c3a, transparent: true, opacity: 0.98, side: THREE.DoubleSide }));
+  pic.position.z = 0.04;
+  const c = document.createElement('canvas'); c.width = 1024; c.height = 624;
+  const g2 = c.getContext('2d');
+  const grad = g2.createLinearGradient(0, 0, 1024, 624);
+  grad.addColorStop(0, '#1a2f6b'); grad.addColorStop(.5, '#7a1f5c'); grad.addColorStop(1, '#0f3f6b');
+  g2.fillStyle = grad; g2.fillRect(0, 0, 1024, 624);
+  g2.strokeStyle = 'rgba(160,220,255,.6)'; g2.lineWidth = 2;
+  for (let i = 0; i < 1024; i += 48) { g2.beginPath(); g2.moveTo(i, 0); g2.lineTo(i, 624); g2.stroke(); }
+  for (let i = 0; i < 624; i += 48) { g2.beginPath(); g2.moveTo(0, i); g2.lineTo(1024, i); g2.stroke(); }
+  g2.fillStyle = '#eaf3ff'; g2.font = '700 148px monospace'; g2.fillText('1210100', 210, 330);
+  g2.font = '600 44px monospace'; g2.fillStyle = 'rgba(180,240,255,.85)';
+  g2.fillText('GESTURE FORGE / CARD', 250, 430);
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  pic.material.map = tex;
+  const glow = new THREE.Mesh(new THREE.PlaneGeometry(3.5, 2.35), new THREE.MeshBasicMaterial({
+    color: 0x4b6bff, transparent: true, opacity: 0.16, side: THREE.DoubleSide }));
+  glow.position.z = -0.06;
+  g.add(body, edge, pic, glow);
+  g.userData = { body, edge, pic, glow, flip: 0 };
+  return g;
+}
+
+/* ---------- 手势辅助 ---------- */
+const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+const handScale = lm => dist(lm[0], lm[9]) || 0.1;
+const pinchRatio = lm => dist(lm[4], lm[8]) / handScale(lm);
+function isFist(lm) {
+  const palm = lm[9], r = handScale(lm);
+  return [8, 12, 16, 20].every(i => dist(lm[i], palm) < r * 1.15);
+}
+function isOpen(lm) {
+  const palm = lm[9], r = handScale(lm);
+  return [8, 12, 16, 20].filter(i => dist(lm[i], palm) > r * 1.85).length >= 4;
+}
+const PINCH_ON = 0.72, PINCH_OFF = 1.05;
+
+/* ---------- 状态机 ---------- */
+let mode = 'idle';            // idle | gem | layers | card
+let targetPos = new THREE.Vector3(0, 0.3, 0);
+let modelPos = new THREE.Vector3(0, 0.3, 0);
+let targetScale = 1, modelScale = 1;
+let targetOpen = 0, modelOpen = 0;
+let targetFlip = 0, modelFlip = 0;
+let pinchLatched = false, twoLatched = false;
+let clearAt = 0;
+let lastSeen = 0;
+const tmp = new THREE.Vector3();
+
+function setMode(next) {
+  if (mode === next) return;
+  if (next === 'gem') {
+    if (!models.gem) { models.gem = buildGem(); group.add(models.gem); }
+    models.gem.visible = true;
+    if (models.layers) models.layers.visible = false;
+    if (models.card) models.card.visible = false;
+  } else if (next === 'layers') {
+    if (!models.gem) { models.gem = buildGem(); group.add(models.gem); }
+    if (!models.layers) { models.layers = buildLayers(); group.add(models.layers); }
+    models.gem.visible = true; models.layers.visible = true;
+    if (models.card) models.card.visible = false;
+  } else if (next === 'card') {
+    if (!models.card) { models.card = buildCard(); group.add(models.card); }
+    models.card.visible = true;
+    if (models.gem) models.gem.visible = false;
+    if (models.layers) models.layers.visible = false;
+  } else {
+    if (clearAt === 0) clearAt = performance.now();
+  }
+  mode = next;
+}
+
+/* ---------- 每帧手势判定 ---------- */
+function processHands(list) {
+  const now = performance.now();
+  handsEl.textContent = 'HANDS: ' + list.length;
+  if (!list.length) {
+    if (now - lastSeen > 420 && mode !== 'idle') setMode('idle');
+    return;
+  }
+  lastSeen = now;
+
+  const a = list[0], b = list[1];
+  const pa = pinchRatio(a), fa = isFist(a), oa = isOpen(a);
+
+  if (fa && !b) { setMode('idle'); stateEl.textContent = 'FIST / CLEARED'; pinchLatched = twoLatched = false; return; }
+
+  if (b && pa < PINCH_ON && pinchRatio(b) < PINCH_ON) {
+    twoLatched = true;
+    setMode('card');
+    stateEl.textContent = 'DUAL PINCH / CARD';
+    const mid = { x: (a[9].x + b[9].x) / 2, y: (a[9].y + b[9].y) / 2 };
+    tmp.set((0.5 - mid.x) * 9.5, (0.5 - mid.y) * 5.4, 0);
+    targetPos.lerp(tmp, 0.4);
+    targetScale = 1 + Math.max(0, 1.5 - (dist(a[4], b[4]) + dist(a[8], b[8])) / 2) * 0.7;
+    targetFlip = THREE.MathUtils.clamp((b[9].x - a[9].x) * 3.2, -1, 1);
+    const spin = (b[9].y - a[9].y);
+    if (models.card) models.card.rotation.x = -spin * 4.2;
+    vecEl.textContent = ((mid.x - .5) * 2).toFixed(2) + ' ' + ((.5 - mid.y) * 2).toFixed(2) + ' ' + spin.toFixed(2);
+    return;
+  }
+  twoLatched = false;
+
+  if (oa && !pinchLatched) {
+    setMode('layers');
+    stateEl.textContent = 'OPEN HAND / LAYERS';
+    targetOpen = 1;
+  } else if (pa < PINCH_ON) {
+    pinchLatched = true;
+    if (mode !== 'layers') setMode('gem');
+    stateEl.textContent = 'PINCH / GEM';
+  } else if (pa > PINCH_OFF) {
+    pinchLatched = false;
+    if (mode === 'gem') stateEl.textContent = 'PINCH / GEM';
+  }
+
+  const p = a[9];
+  tmp.set((0.5 - p.x) * 9.5, (0.5 - p.y) * 5.4, 0);
+  targetPos.lerp(tmp, 0.55);
+  const span = dist(a[4], a[8]);
+  targetScale = THREE.MathUtils.clamp(1.35 - span * 4.6, 0.55, 2.3);
+  if (mode !== 'layers') targetOpen = pa < PINCH_ON ? 0.25 : 0.75;
+  vecEl.textContent = ((p.x - .5) * 2).toFixed(2) + ' ' + ((.5 - p.y) * 2).toFixed(2) + ' 0.00';
+}
+
+/* ---------- 骨骼叠加 ---------- */
+const BONES = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],
+  [9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+function drawSkeleton(list) {
+  const r = skel.getBoundingClientRect();
+  if (skel.width !== r.width * 2) { skel.width = r.width * 2; skel.height = r.height * 2; }
+  sctx.clearRect(0, 0, skel.width, skel.height);
+  if (!list.length) return;
+  sctx.lineWidth = 3; sctx.strokeStyle = 'rgba(120,225,255,.75)';
+  sctx.shadowColor = 'rgba(90,190,255,.9)'; sctx.shadowBlur = 9;
+  const pt = p => ({ x: (1 - p.x) * skel.width, y: p.y * skel.height });
+  for (const lm of list) {
+    for (const [i, j] of BONES) {
+      const A = pt(lm[i]), B = pt(lm[j]);
+      sctx.beginPath(); sctx.moveTo(A.x, A.y); sctx.lineTo(B.x, B.y); sctx.stroke();
+    }
+    sctx.fillStyle = 'rgba(255,138,184,.95)';
+    for (const p of lm) { const q = pt(p); sctx.beginPath(); sctx.arc(q.x, q.y, 3.4, 0, Math.PI * 2); sctx.fill(); }
+  }
+  sctx.shadowBlur = 0;
+}
+
+/* ---------- 演示模式 ---------- */
+let demo = false, demoT = 0;
+function demoFrame() {
+  demoT += 0.016;
+  const p = { x: 0.5 + Math.sin(demoT * 0.7) * 0.11, y: 0.5 + Math.cos(demoT * 0.9) * 0.09 };
+  tmp.set((0.5 - p.x) * 9.5, (0.5 - p.y) * 5.4, 0);
+  targetPos.lerp(tmp, 0.4);
+  const cyc = demoT % 16;
+  if (cyc < 4) { setMode('gem'); stateEl.textContent = 'DEMO / PINCH'; }
+  else if (cyc < 8) { setMode('layers'); targetOpen = 1; stateEl.textContent = 'DEMO / OPEN HAND'; }
+  else if (cyc < 13) { setMode('card'); targetFlip = Math.sin(demoT * 1.6); stateEl.textContent = 'DEMO / DUAL PINCH'; }
+  else { setMode('idle'); stateEl.textContent = 'DEMO / FIST'; }
+  handsEl.textContent = 'HANDS: simulated';
+  vecEl.textContent = ((p.x - .5) * 2).toFixed(2) + ' ' + ((.5 - p.y) * 2).toFixed(2) + ' 0.00';
+}
+
+/* ---------- 主循环 ---------- */
+const clock = new THREE.Clock();
+function loop() {
+  requestAnimationFrame(loop);
+  const t = clock.getElapsedTime();
+  if (demo) demoFrame();
+
+  modelPos.lerp(targetPos, 0.18);
+  modelScale += (targetScale - modelScale) * 0.16;
+  modelOpen += (targetOpen - modelOpen) * 0.12;
+  modelFlip += (targetFlip - modelFlip) * 0.14;
+
+  group.position.copy(modelPos);
+  group.scale.setScalar(modelScale);
+  group.rotation.y = Math.sin(t * 0.25) * 0.16 + modelFlip * 0.5;
+  group.rotation.x = Math.sin(t * 0.19) * 0.08;
+
+  if (models.gem) {
+    const u = models.gem.userData;
+    u.octa.material.uniforms.uTime.value = t;
+    u.octa.rotation.y += 0.011; u.octa.rotation.x += 0.005;
+    u.wire.rotation.y -= 0.008; u.wire.rotation.z += 0.004;
+    u.tetra.rotation.y += 0.017; u.tetra.rotation.x -= 0.012;
+    u.halo.rotation.z += 0.006;
+    u.halo.lookAt(camera.position);
+    const s = 1 + Math.sin(t * 2.2) * 0.035;
+    u.halo.scale.setScalar(s);
+    u.octa.material.uniforms.uOpen.value = modelOpen;
+  }
+  if (models.layers) {
+    models.layers.userData.inners.forEach(m => {
+      const spread = 1 + modelOpen * 1.15;
+      const ty = m.userData.targetY * spread;
+      m.position.y += (ty - m.position.y) * 0.14;
+      m.rotation.y = m.userData.base + t * (0.16 + 0.05 * modelOpen) + modelOpen * 0.7;
+      if (m.material.uniforms) m.material.uniforms.uOpen.value = modelOpen;
+    });
+    models.layers.visible = true;
+  }
+  if (models.card) {
+    const u = models.card.userData;
+    u.body.material.uniforms.uTime.value = t;
+    u.body.rotation.y += (modelFlip * 1.15 - u.body.rotation.y) * 0.12;
+    u.edge.rotation.y = u.body.rotation.y; u.pic.rotation.y = u.body.rotation.y;
+    u.glow.rotation.y = u.body.rotation.y;
+    u.glow.material.opacity = 0.13 + Math.sin(t * 2) * 0.05;
+  }
+  if (clearAt && performance.now() - clearAt > 360) { clearAt = 0; }
+
+  stars.rotation.y = t * 0.014;
+  rimA.position.x = -4.5 + Math.sin(t * 0.6) * 0.9;
+  rimB.position.y = 2 + Math.cos(t * 0.5) * 0.9;
+  composer.render();
+}
+loop();
+
+/* ---------- 摄像头与 MediaPipe ---------- */
+const errEl = $('#err');
+function fail(msg) { errEl.textContent = msg; errEl.style.display = 'block'; }
+
+async function startCamera() {
+  const b = $('#start');
+  b.disabled = true; b.textContent = '正在启动...';
+  stateEl.textContent = 'REQUESTING CAMERA';
+  try {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('unsupported');
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: 960, height: 720 }, audio: false });
+    video.srcObject = stream; await video.play();
+    video.classList.remove('off');
+    stateEl.textContent = 'LOADING HAND MODEL';
+    const vision = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/+esm');
+    const fileset = await vision.FilesetResolver.forVisionTasks(
+      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm');
+    const landmarker = await vision.HandLandmarker.createFromOptions(fileset, {
+      baseOptions: {
+        modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
+        delegate: 'GPU'
+      },
+      runningMode: 'VIDEO', numHands: 2,
+      minHandDetectionConfidence: 0.5, minTrackingConfidence: 0.5, minHandPresenceConfidence: 0.5
+    });
+    b.textContent = '摄像头已启用';
+    stateEl.textContent = 'TRACKING / 把手放到镜头前';
+    let last = -1;
+    const detect = () => {
+      requestAnimationFrame(detect);
+      if (video.readyState < 2) return;
+      const now = performance.now();
+      if (now - last < 28) return;
+      last = now;
+      try {
+        const res = landmarker.detectForVideo(video, now);
+        const list = res.landmarks || [];
+        processHands(list);
+        drawSkeleton(list);
+      } catch (e) { /* 单帧失败忽略 */ }
+    };
+    detect();
+  } catch (e) {
+    console.error(e);
+    b.disabled = false; b.textContent = '重试摄像头';
+    if (e.name === 'NotAllowedError') fail('摄像头权限被拒绝。请点击地址栏左侧的摄像头图标，把权限改为“允许”，然后刷新页面。');
+    else if (e.name === 'NotFoundError') fail('未检测到摄像头设备。');
+    else if (e.message === 'unsupported') fail('当前浏览器不支持摄像头访问，请改用 Chrome 或 Edge。');
+    else fail('启动失败：' + (e.name || e.message) + '。可先点击“演示模式”查看效果。');
+    stateEl.textContent = 'CAMERA ERROR / DEMO READY';
+  }
+}
+
+$('#start').addEventListener('click', startCamera);
+$('#demo').addEventListener('click', () => {
+  demo = !demo;
+  $('#demo').textContent = demo ? '停止演示' : '演示模式';
+  if (!demo) { setMode('idle'); stateEl.textContent = 'STANDBY'; }
+});
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight); composer.setSize(innerWidth, innerHeight);
+  bloom.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
