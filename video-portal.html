@@ -613,7 +613,7 @@ function curlScore(lm) {
     const dTip = d3(lm[tip], palm) / r;
     const dPip = d3(lm[pip], palm) / r;
     // ① 指尖靠近掌心（放宽：阈值放到 2.0，正常收拢约 1.0~1.4）
-    const near = clamp01((2.05 - dTip) / 0.85);
+    const near = clamp01((2.25 - dTip) / 0.95);
     // ② 指尖比第二指节更靠近掌心 = 真的弯曲
     const bent = clamp01((dPip - dTip) / (dPip * 0.30 + 1e-6));
     return near * 0.5 + bent * 0.5;
@@ -621,7 +621,7 @@ function curlScore(lm) {
   // 最小值主导但不极端，兼顾"都要收紧"和容错
   scores.sort((a, b) => a - b);
   const worst = scores[0], avg = (scores[0] + scores[1] + scores[2]) / 3;
-  return clamp01(worst * 0.55 + avg * 0.45);
+  return clamp01(worst * 0.45 + avg * 0.55);
 }
 /* 食指与拇指必须"明显伸开"才允许四边形 */
 function indexThumbClearlyOpen(lm) {
@@ -632,7 +632,7 @@ function indexThumbClearlyOpen(lm) {
   lm.__idxR = idxRatio; lm.__thumbR = thumbRatio;
   return idxRatio > 1.55 && thumbRatio > 1.25;
 }
-const CURL_ON = 0.58, CURL_OFF = 0.38;
+const CURL_ON = 0.48, CURL_OFF = 0.32;
 function isOthersCurled(lm) {
   const s = curlScore(lm);
   lm.__curl = s;
