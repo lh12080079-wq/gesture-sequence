@@ -1775,6 +1775,32 @@ async function start() {
 }
 function showErr(m) { errEl.textContent = m; errEl.style.display = 'block'; }
 
+
+/* ---------- 视频编解码探测 ---------- */
+async function probeVideoCodec(file) {
+  // 用 MediaSource 的 isTypeSupported 探测常见编码
+  const info = { name: file.name, size: (file.size / 1048576).toFixed(1) + 'MB', type: file.type || '(无)' };
+  // 读取文件头部字节，判断容器与编码
+  try {
+    const head = new Uint8Array(await file.slice(0, 262144).arrayBuffer());
+    // 查找 "ftyp" 判断容器
+    const ascii = Array.from(head.slice(0, 4096)).map(b => String.fromCharCode(b)).join('');
+    if (ascii.indexOf('ftyp') >= 0) {
+      const brand = ascii.substr(ascii.indexOf('ftyp') + 4, 4);
+      info.container = 'MP4/' + brand.replace(/[^a-zA-Z0-9]/g, '');
+    } else if (ascii.indexOf('matroska') >= 0) info.container = 'MKV';
+    else info.container = '未知';
+    // 查找编码标识
+    const s = Array.from(head).map(b => String.fromCharCode(b)).join('');
+    if (s.indexOf('hvc1') >= 0 || s.indexOf('hev1') >= 0) info.codec = 'H.265 / HEVC';
+    else if (s.indexOf('avc1') >= 0) info.codec = 'H.264 / AVC';
+    else if (s.indexOf('av01') >= 0) info.codec = 'AV1';
+    else if (s.indexOf('vp09') >= 0) info.codec = 'VP9';
+    else info.codec = '未识别';
+  } catch (e) { info.codec = '读取失败'; }
+  return info;
+}
+
 /* ---------- 播放控制：触发阈值后才开始播放 ---------- */
 function startPlayback() {
   if (videoStarted) return;
@@ -1801,6 +1827,18 @@ $('#file').addEventListener('change', e => {
   const f = e.target.files && e.target.files[0];
   if (!f) return;
   const url = URL.createObjectURL(f);
+  // 先探测编码格式，便于诊断
+  probeVideoCodec(f).then(pi => {
+    window.__videoInfo = pi;
+    const bad = /H\.265|HEVC|AV1|未识别/.test(pi.codec);
+    if (bad) {
+      showErr('检测到视频编码：' + pi.codec + '（' + pi.container + '）\n\n' +
+        '浏览器可能无法解码这个编码，这正是画面黑屏的原因。\n\n' +
+        '请转码为 H.264 编码的 MP4（建议同时降到 1080p）。');
+    }
+    const ls = document.getElementById('loadState');
+    if (ls) ls.dataset.codec = pi.codec;
+  }).catch(() => {});
   // 载入新视频前：彻底重置状态，避免沿用旧视频的绘制标记导致黑屏
   try { bgVideo.pause(); } catch (e) {}
   bgVideo.removeAttribute('src');
@@ -1822,6 +1860,10 @@ $('#file').addEventListener('change', e => {
     if (vlayer && vlayer.dataset) vlayer.dataset.drawn = '0';
     $('#loadState').textContent = '已载入：' + f.name + '（' + bgVideo.videoWidth + 'x' + bgVideo.videoHeight + '）';
     if (!camOn) setState('视频就绪', '现在点击“启用摄像头”开始', 'ok');
+    // 4K 视频提示性能风险
+    if (bgVideo.videoWidth >= 3000) {
+      $('#loadState').textContent += ' ⚠4K视频解码负担大，建议转为 1080p';
+    }
   };
   if (bgVideo.readyState >= 2) onReady();
   else {
