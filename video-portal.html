@@ -600,7 +600,7 @@ function loop() {
   fullMix = lerp(fullMix, targetFull, 0.08);
   $('#fullbar').style.opacity = fullMix > 0.05 ? 1 : 0;
   $('#fullbar').querySelector('.fill2').style.width = Math.round(fullMix * 100) + '%';
-  $('#fullbar').querySelector('.lbl').textContent = locked ? 'FULLSCREEN / 手势已停止' : 'FULLSCREEN PROGRESS (80%)';
+  $('#fullbar').querySelector('.lbl').textContent = locked ? 'FULLSCREEN / 握拳退出' : 'FULLSCREEN PROGRESS (80%)';
   const ex = $('#exitFull');
   if (ex) ex.style.display = 'none';   // 改为纯手势退出，按钮隐藏
   renderMask();
