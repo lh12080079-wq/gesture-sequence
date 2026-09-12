@@ -287,7 +287,9 @@ const flayer = $('#flayer'), fctx = flayer.getContext('2d');
    否则四点坐标与挖洞坐标系错位（曾因骨架固定 2x 而 mask 用 DPR 导致错位） */
 let CANVAS_W = 0, CANVAS_H = 0;
 function resizeSkel() {
-  const dpr = Math.min(devicePixelRatio || 1, 2);
+  // 画布分辨率随性能档位缩放：低档降分辨率以保帧率
+  const dprBase = Math.min(devicePixelRatio || 1, 2);
+  const dpr = Math.max(1, dprBase * (PERF.quality || 1));
   CANVAS_W = Math.round(innerWidth * dpr);
   CANVAS_H = Math.round(innerHeight * dpr);
   if (skel.width !== CANVAS_W || skel.height !== CANVAS_H) {
@@ -485,6 +487,8 @@ refreshBinTags();
 
 function drawBinaryUI(p, t) {
   if (!p || p.length !== 4) return;
+  // 低性能设备简化数字层
+  const simple = PERF.level <= 1;
   binPhase += 0.016;
 
   // 每 0.45 秒刷新一次数字内容（跳动感）
@@ -1135,7 +1139,7 @@ function drawHexGrid() {
   const W = hexCanvas.width, H = hexCanvas.height;
   if (!W) return;
   hctx.clearRect(0, 0, W, H);
-  const R = 46, t = hexT += 0.006;
+  const R = PERF.level >= 2 ? 46 : 68, t = hexT += 0.006;   // 低档用更大格子减少绘制量
   hctx.lineWidth = 1.2;
   for (let row = -1, y = 0; y < H + R; row++, y += R * 1.5) {
     for (let col = -1, x = 0; x < W + R; col++, x += R * Math.sqrt(3)) {
@@ -1467,6 +1471,61 @@ async function loadVision() {
   throw new Error('无法加载 MediaPipe：' + (last && last.message || 'unknown'));
 }
 
+
+/* ================= 自适应性能系统 =================
+   根据设备实际帧率动态调整：检测间隔、渲染质量
+   高性能设备（平板）跑满帧，低性能设备（老电脑）自动降载 */
+const PERF = {
+  level: 3,              // 0=很低 1=低 2=中 3=高
+  detectMs: 12,          // 当前检测间隔
+  fpsAvg: 0,             // 平滑后的 FPS
+  fpsSamples: [],
+  lastAdjust: 0,
+  quality: 1.0           // 渲染质量系数
+};
+/* 探测设备能力：CPU 核心数 + 内存 + 设备类型 */
+function detectDeviceTier() {
+  const cores = navigator.hardwareConcurrency || 4;
+  const mem = navigator.deviceMemory || 4;
+  const isMobile = /Android|iPad|iPhone|Tablet/i.test(navigator.userAgent);
+  let tier = 2;
+  if (cores >= 8 && mem >= 8) tier = 3;
+  else if (cores >= 6 && mem >= 4) tier = 3;
+  else if (cores >= 4) tier = 2;
+  else if (cores >= 2) tier = 1;
+  else tier = 0;
+  // 移动设备如果配置高，也给高档（平板的 GPU 通常更强）
+  if (isMobile && cores >= 6) tier = 3;
+  return tier;
+}
+PERF.level = detectDeviceTier();
+PERF.detectMs = [24, 18, 14, 10][PERF.level];   // 对应目标帧率 42/56/71/100
+PERF.quality = [0.6, 0.75, 0.9, 1.0][PERF.level];
+
+/* 运行时反馈调节：连续偏低就降档，持续很高就升档 */
+function adjustPerformance(fps) {
+  const now = performance.now();
+  if (now - PERF.lastAdjust < 2500) return;    // 每 2.5s 最多调整一次
+  PERF.fpsSamples.push(fps);
+  if (PERF.fpsSamples.length > 3) PERF.fpsSamples.shift();
+  const avg = PERF.fpsSamples.reduce((a, b) => a + b, 0) / PERF.fpsSamples.length;
+  PERF.fpsAvg = avg;
+  const target = [30, 42, 56, 70][PERF.level];
+  // 明显低于目标 → 降档
+  if (avg < target * 0.72 && PERF.level > 0) {
+    PERF.level--; PERF.lastAdjust = now; PERF.fpsSamples = [];
+  }
+  // 明显高于目标 → 升档
+  else if (avg > target * 1.25 && PERF.level < 3) {
+    PERF.level++; PERF.lastAdjust = now; PERF.fpsSamples = [];
+  } else return;
+  PERF.detectMs = [24, 18, 14, 10][PERF.level];
+  PERF.quality = [0.6, 0.75, 0.9, 1.0][PERF.level];
+  if (diagEl) diagEl.dataset.perf = 'L' + PERF.level;
+  // 画布分辨率随档位变化，需重建
+  try { resizeSkel(); } catch (e) {}
+}
+
 /* ---------- 启动 ---------- */
 async function start() {
   const b = $('#start');
@@ -1499,7 +1558,7 @@ async function start() {
       requestAnimationFrame(tick);
       if (cam.readyState < 2) return;
       const now = performance.now();
-      if (now - prev < 12) return;   // 约 80fps 检测，减少丢帧
+      if (now - prev < PERF.detectMs) return;   // 自适应检测间隔
       prev = now;
       let raw = [];
       try { raw = landmarker.detectForVideo(cam, now).landmarks || []; } catch (e) { return; }
@@ -1515,7 +1574,11 @@ async function start() {
       onHands(list);
       drawSkeleton(list, mode === 'point');
       fps++;
-      if (now - fAt > 1000) { $('#fps').textContent = 'FPS ' + fps; fps = 0; fAt = now; }
+      if (now - fAt > 1000) {
+        $('#fps').textContent = 'FPS ' + fps + ' · L' + PERF.level;
+        adjustPerformance(fps);
+        fps = 0; fAt = now;
+      }
     };
     tick();
   } catch (e) {
@@ -1662,7 +1725,9 @@ function loop() {
       : '<span class="bad2">未就绪 ' + bgVideo.readyState + '</span>';
     diagEl.innerHTML =
       '摄像头 ' + camTxt + ' | 视频 ' + vidTxt + '\n' +
-      '画布 mask ' + maskCanvas.width + 'x' + maskCanvas.height + ' vlay ' + vlayer.width + 'x' + vlayer.height + '\n' +
+      '画布 ' + maskCanvas.width + 'x' + maskCanvas.height +
+      ' | 性能档 L' + PERF.level + ' 间隔' + PERF.detectMs + 'ms' +
+      (PERF.fpsAvg ? ' 均帧' + PERF.fpsAvg.toFixed(0) : '') + '\n' +
       '手 ' + lastList.length + ' | mode <span class="' + (mode === 'fan' ? 'ok2' : (mode === 'rect' ? 'warn2' : '')) + '">' + mode + '</span>' +
       ' | reveal ' + R(reveal, 2) + ' | fullMix ' + R(fullMix, 2) + '\n' +
       '握拳 ' + lastList.map(l => tagNum(l.__clench, CLENCH_ON)).join(' ') +
