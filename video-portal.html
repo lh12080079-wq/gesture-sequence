@@ -582,14 +582,17 @@ function confirmMode(next) {
 function curlScore(lm) {
   const palm = lm[9], r = scaleOf(lm);
   const OTHERS = [12, 16, 20];
-  // 逐指打分，用"最好的两指"加权，避免某一指不听话拉低整体
-  const scores = OTHERS.map(i => clamp01((1.75 - d2(lm[i], palm) / r) / 0.75));
-  scores.sort((a, b) => b - a);
-  const top2 = (scores[0] + scores[1]) / 2;
-  const all3 = (scores[0] + scores[1] + scores[2]) / 3;
-  return clamp01(top2 * 0.6 + all3 * 0.4);
+  // 收拢 = 指尖靠近掌心。归一化比值 1.0 已算收拢，2.0 为完全张开
+  const scores = OTHERS.map(i => {
+    const ratio = d2(lm[i], palm) / r;
+    return clamp01((1.85 - ratio) / 0.75);
+  });
+  // 三指都要收拢：用最小值作为主导，略加平均，确保"全都收紧"
+  scores.sort((a, b) => a - b);
+  const worst = scores[0], avg = (scores[0] + scores[1] + scores[2]) / 3;
+  return clamp01(worst * 0.6 + avg * 0.4);
 }
-const CURL_ON = 0.55, CURL_OFF = 0.35;
+const CURL_ON = 0.50, CURL_OFF = 0.32;
 function isOthersCurled(lm) {
   const s = curlScore(lm);
   lm.__curl = s;
@@ -1054,8 +1057,11 @@ function onHands(list) {
     mode = 'rect';
   }
 
-  // 四边形模式：只要检测到两只手就成立（四点=两手食指+拇指）
-  if (list.length >= 2) {
+  // 四边形模式：必须两手「其余六指全部收紧」才触发
+  // 即每只手中指(12)/无名指(16)/小指(20)都要收拢，只伸食指(8)+拇指(4)
+  const bothCurled = list.length >= 2 &&
+    list.every(lm => curlScore(lm) >= CURL_ON);
+  if (bothCurled) {
     const a = list[0], b = list[1];
     const g = computeRectGeo(a, b);
     rect = g;
@@ -1094,6 +1100,16 @@ function onHands(list) {
         setState('RECT / 抠洞 ' + Math.round(area * 100) + '%', '四指比框 — 透过四边形看视频', 'live');
       }
     }
+    return;
+  }
+
+  // 检测到两只手但六指未收紧：不触发四边形，明确提示
+  if (list.length >= 2) {
+    mode = 'idle'; liveQuad = null; smoothRect = null;
+    targetReveal = 0; targetFull = 0;
+    const curls = list.map(lm => (lm.__curl = curlScore(lm)).toFixed(2)).join(' / ');
+    setState('收紧其余六指才触发四边形',
+      '两手都：中指/无名指/小指收拢，只伸食指+拇指｜收拢分 ' + curls + ' 需≥' + CURL_ON, 'warn');
     return;
   }
 
