@@ -52,6 +52,11 @@
   #meta{margin-top:6px;font-size:9px;color:#5c7fa8;display:flex;gap:12px;flex-wrap:wrap}
   #loadState{margin-top:6px;font-size:9px;color:#8fb0dd;max-width:46vw;word-break:break-all}
 
+  #diag{position:fixed;z-index:11;left:20px;bottom:calc(18px + env(safe-area-inset-bottom));
+    font-size:10px;line-height:1.75;color:#9fe6ff;background:rgba(4,12,24,.82);
+    border:1px solid rgba(57,230,255,.35);border-radius:9px;padding:9px 13px;
+    font-family:Consolas,monospace;letter-spacing:.04em;pointer-events:none;white-space:pre}
+  #diag .warn2{color:#ffb35c}#diag .ok2{color:#5cffb0}#diag .bad2{color:#ff6b9e}
   #hint{position:fixed;z-index:9;left:50%;bottom:calc(88px + env(safe-area-inset-bottom));
     transform:translateX(-50%);font-size:11px;letter-spacing:.16em;color:#8fd8ff;
     background:rgba(6,18,34,.62);border:1px solid rgba(57,230,255,.32);border-radius:22px;
@@ -152,6 +157,7 @@
   <input id="fw" type="range" min="0" max="24" step="1" value="8">
 </div>
 
+<div id="diag"></div>
 <div id="hint"></div>
 
 <div id="guide">
@@ -214,6 +220,8 @@ let fullMix = 0, targetFull = 0;    // 0..1 全屏混合
 let lastList = [];
 let liveQuad = null;   // 当前四边形四点（屏幕坐标）
 let lastArea = 0;      // 最近一次的四边形占屏比例
+let diagTick = 0;
+let diagEl = null;
 let FULL_THRESHOLD = 0.80;          // 可调：矩形占屏比例阈值（全屏触发）
 let isFull = false;                 // 是否已进入全屏（带滞回）
 let rect = { x: 0, y: 0, w: 0, h: 0, cx: 0, cy: 0, ang: 0 };
@@ -871,9 +879,29 @@ function loop() {
     drawSkeleton(lastList, mode === 'point');
   }
   drawHexGrid();
+
+  // ---- 实时诊断面板 ----
+  if (diagEl && diagTick++ % 12 === 0) {
+    const R = (v, n) => (typeof v === 'number' ? v.toFixed(n) : String(v));
+    const q = (liveQuad && liveQuad.length === 4)
+      ? liveQuad.map(p => '(' + Math.round(p.x) + ',' + Math.round(p.y) + ')').join(' ')
+      : '无四点';
+    const camTxt = camOn ? '<span class="ok2">开</span>' : '<span class="bad2">关</span>';
+    const vidTxt = (bgVideo.readyState >= 2)
+      ? '<span class="ok2">' + bgVideo.videoWidth + 'x' + bgVideo.videoHeight + '</span>'
+      : '<span class="bad2">未就绪 ' + bgVideo.readyState + '</span>';
+    diagEl.innerHTML =
+      '摄像头 ' + camTxt + ' | 视频 ' + vidTxt + '\n' +
+      '画布 mask ' + maskCanvas.width + 'x' + maskCanvas.height + ' vlay ' + vlayer.width + 'x' + vlayer.height + '\n' +
+      '手 ' + lastList.length + ' | mode ' + mode + ' | reveal ' + R(reveal, 2) + ' | fullMix ' + R(fullMix, 2) + '\n' +
+      '四点 ' + q + '\n' +
+      '占屏 <span class="' + (lastArea >= FULL_THRESHOLD ? 'ok2' : 'warn2') + '">' + R(lastArea * 100, 1) + '%</span>' +
+      ' / 阈值 ' + R(FULL_THRESHOLD * 100, 0) + '% | isFull ' + (isFull ? 'Y' : 'N');
+  }
 }
 loop();
 resizeSkel();
+diagEl = document.getElementById('diag');
 window.__ready = true;
 if (bootEl) bootEl.style.display = 'none';
 </script>
