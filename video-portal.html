@@ -20,12 +20,15 @@
   /* 层级：z0 视频源 · z1 视频层(全屏) · z2 摄像头+挖洞 · z4 骨架 · z5+ 装饰 */
   /* 视频层：位于摄像头遮罩之上、装饰之下，专门按四边形透视绘制 */
   #vlayer{position:fixed;left:0;top:0;width:100%;height:100%;z-index:1;pointer-events:none}
+  /* 滤镜层：位于摄像头遮罩之上，确保滤镜可见 */
+  #flayer{position:fixed;left:0;top:0;width:100%;height:100%;z-index:3;pointer-events:none}
 
   /* 隐藏的取景源 */
   #cam{position:fixed;left:-9999px;top:0;width:2px;height:2px;opacity:0;pointer-events:none}
 
   /* 骨架叠加 */
   #skel{position:fixed;inset:0;width:100%;height:100%;z-index:4;pointer-events:none}
+  /* 层级：z0 视频源 · z1 视频层 · z2 摄像头+挖洞 · z3 滤镜层 · z4 骨架 · z5+ 装饰 */
 
   /* 网格 / 扫描 / 颗粒 */
   #grid{position:fixed;inset:0;z-index:5;pointer-events:none;opacity:.22;
@@ -124,6 +127,7 @@
 <!-- 上层：摄像头画面 + 挖洞后的透明遮罩 -->
 <canvas id="mask"></canvas>
 <canvas id="vlayer"></canvas>
+<canvas id="flayer"></canvas>
 
 <!-- 取景源与骨架 -->
 <video id="cam" playsinline muted autoplay></video>
@@ -239,6 +243,7 @@ let videoStarted = false;   // 是否已开始播放（触发阈值后才 true�
 /* ---------- 画布 ---------- */
 const maskCanvas = $('#mask'), mctx = maskCanvas.getContext('2d');
 const vlayer = $('#vlayer'), vctx = vlayer.getContext('2d');
+const flayer = $('#flayer'), fctx = flayer.getContext('2d');
 
 /* ---------- 元素尺寸 ---------- */
 /* 统一画布尺寸：骨架 / 遮罩 / 视频层必须完全一致，
@@ -256,6 +261,9 @@ function resizeSkel() {
   }
   if (vlayer && (vlayer.width !== CANVAS_W || vlayer.height !== CANVAS_H)) {
     vlayer.width = CANVAS_W; vlayer.height = CANVAS_H;
+  }
+  if (flayer && (flayer.width !== CANVAS_W || flayer.height !== CANVAS_H)) {
+    flayer.width = CANVAS_W; flayer.height = CANVAS_H;
   }
 }
 addEventListener('resize', resizeSkel);
@@ -772,9 +780,14 @@ const fxCanvas = document.createElement('canvas');
 const fxctx = fxCanvas.getContext('2d');
 
 function renderFanFilters() {
+  if (!flayer.width) return;
+  const W = flayer.width, H = flayer.height;
+  fctx.setTransform(1, 0, 0, 1, 0, 0);
+  fctx.globalCompositeOperation = 'source-over';
+  fctx.globalAlpha = 1;
+  fctx.filter = 'none';
+  fctx.clearRect(0, 0, W, H);
   if (!fanTriangles.length) return;
-  const W = vlayer.width, H = vlayer.height;
-  if (!W || !H) return;
   if (fxCanvas.width !== W || fxCanvas.height !== H) { fxCanvas.width = W; fxCanvas.height = H; }
   const hasVideo = bgVideo.readyState >= 2 && bgVideo.videoWidth;
   const hasCam = camOn && cam.videoWidth;
@@ -800,25 +813,25 @@ function renderFanFilters() {
     }
     fxctx.filter = 'none';
 
-    // 2) 用三角形裁剪，把滤镜帧贴到视频层
-    vctx.save();
-    vctx.beginPath();
-    vctx.moveTo(A.x, A.y); vctx.lineTo(B.x, B.y); vctx.lineTo(C.x, C.y);
-    vctx.closePath();
-    vctx.clip();
-    vctx.globalCompositeOperation = 'source-over';
-    vctx.drawImage(fxCanvas, 0, 0);
+    // 2) 用三角形裁剪，把滤镜帧贴到独立滤镜层（在摄像头之上）
+    fctx.save();
+    fctx.beginPath();
+    fctx.moveTo(A.x, A.y); fctx.lineTo(B.x, B.y); fctx.lineTo(C.x, C.y);
+    fctx.closePath();
+    fctx.clip();
+    fctx.globalCompositeOperation = 'source-over';
+    fctx.drawImage(fxCanvas, 0, 0);
 
-    // 3) 叠加色调，进一步强化滤镜差异
+    // 3) 叠加色调，强化滤镜差异
     const col = ['rgba(57,230,255,', 'rgba(255,92,200,', 'rgba(255,180,60,', 'rgba(170,90,255,'][i];
-    vctx.globalCompositeOperation = 'lighter';
-    vctx.fillStyle = col + '0.18)';
-    vctx.fillRect(0, 0, W, H);
-    vctx.restore();
+    fctx.globalCompositeOperation = 'lighter';
+    fctx.fillStyle = col + '0.20)';
+    fctx.fillRect(0, 0, W, H);
+    fctx.restore();
   }
-  vctx.globalCompositeOperation = 'source-over';
-  vctx.filter = 'none';
-  vctx.globalAlpha = 1;
+  fctx.globalCompositeOperation = 'source-over';
+  fctx.filter = 'none';
+  fctx.globalAlpha = 1;
 }
 
 /* ---------- 用两手的食指与拇指构造矩形 ---------- */
@@ -1535,12 +1548,14 @@ function loop() {
     // 全屏：清空摄像头遮罩层与骨架层，只保留视频
     if (maskCanvas.width) mctx.setTransform(1, 0, 0, 1, 0, 0), mctx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
     if (skel.width) sctx.clearRect(0, 0, skel.width, skel.height);
+    if (flayer.width) fctx.clearRect(0, 0, flayer.width, flayer.height);
     drawVideoFull();
   } else {
     renderMask();
     drawVideoFull();
     // 滤镜必须在视频层绘制之后应用，否则会被覆盖
     if (mode === 'fan' && fanTriangles.length) renderFanFilters();
+    else if (flayer.width) fctx.clearRect(0, 0, flayer.width, flayer.height);
     drawSkeleton(lastList, mode === 'point' && !liveQuad);
     if (mode === 'fan' && fanApex && fanTips.length === 5) {
       drawFanUI(fanApex, fanTips, performance.now());
