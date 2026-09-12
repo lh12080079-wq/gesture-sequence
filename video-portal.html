@@ -322,8 +322,7 @@ const flayer = $('#flayer'), fctx = flayer.getContext('2d');
 let CANVAS_W = 0, CANVAS_H = 0;
 function resizeSkel() {
   // 画布分辨率随性能档位缩放：低档降分辨率以保帧率
-  // DPR 上限 1.5（原 2）：显著降低渲染负载，视觉差异极小
-  const dprBase = Math.min(devicePixelRatio || 1, 1.5);
+  const dprBase = Math.min(devicePixelRatio || 1, 2);
   const dpr = Math.max(1, dprBase * (PERF.quality || 1));
   CANVAS_W = Math.round(innerWidth * dpr);
   CANVAS_H = Math.round(innerHeight * dpr);
@@ -1640,10 +1639,7 @@ function startRecording() {
 
   const stream = recCanvas.captureStream(60);   // 60fps 录制
   try {
-    // 码率随画布尺寸自适应，避免小画布用高码率浪费性能
-  const px = recCanvas.width * recCanvas.height;
-  const bitrate = px > 2000000 ? 10000000 : (px > 900000 ? 6000000 : 3500000);
-  recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: bitrate });
+    recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 10000000 });
   } catch (e) {
     showErr('录制初始化失败：' + e.message);
     return;
@@ -1721,7 +1717,7 @@ async function start() {
   try {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('此浏览器不支持摄像头');
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'user', width: 960, height: 540 }, audio: false });
+      video: { facingMode: 'user', width: 1280, height: 720 }, audio: false });
     cam.srcObject = stream; await cam.play();
     camOn = true; resizeSkel();
     setState('摄像头已开启', '正在加载手部模型', 'ok');
