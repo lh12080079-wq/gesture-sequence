@@ -229,6 +229,7 @@ let smoothRect = null;
 let pointPos = null;           // 单点（握指手）
 let otherTips = [];            // 另一只手五指指尖
 let lastSeen = 0, camOn = false, hasUserVideo = false;
+let videoStarted = false;   // 是否已开始播放（触发阈值后才 true）
 
 /* ---------- 画布 ---------- */
 const maskCanvas = $('#mask'), mctx = maskCanvas.getContext('2d');
@@ -829,6 +830,7 @@ function onHands(list) {
         isFull = true;
         targetFull = 1;
         glitch();
+        startPlayback();
         setState('FULL / 全屏播放', '已进入全屏 — 不会因手势变化退出', 'full');
       } else {
         setState('RECT / 抠洞 ' + Math.round(area * 100) + '%', '四指比框 — 透过四边形看视频', 'live');
@@ -931,6 +933,26 @@ async function start() {
 }
 function showErr(m) { errEl.textContent = m; errEl.style.display = 'block'; }
 
+/* ---------- 播放控制：触发阈值后才开始播放 ---------- */
+function startPlayback() {
+  if (videoStarted) return;
+  videoStarted = true;
+  // 先静音播放确保自动播放策略通过，再尝试开声音
+  bgVideo.muted = true;
+  bgVideo.play().then(() => {
+    bgVideo.muted = false;
+    $('#loadState').textContent = '播放中（有声）';
+  }).catch(() => {
+    bgVideo.muted = true;
+    $('#loadState').textContent = '播放中（静音，浏览器限制了自动播放）';
+  });
+}
+function resetPlayback() {
+  videoStarted = false;
+  try { bgVideo.pause(); bgVideo.currentTime = 0; } catch (e) {}
+  $('#loadState').textContent = '已回到封面帧（撑满阈值后播放）';
+}
+
 /* ---------- 上传本地视频 ---------- */
 $('#pick').addEventListener('click', () => $('#file').click());
 $('#file').addEventListener('change', e => {
@@ -938,25 +960,30 @@ $('#file').addEventListener('change', e => {
   if (!f) return;
   const url = URL.createObjectURL(f);
   bgVideo.src = url;
-  bgVideo.loop = true; bgVideo.muted = false;
-  bgVideo.play().then(() => {
+  bgVideo.loop = true; bgVideo.muted = true;
+  // 只加载到第一帧，暂停等待触发阈值后再播放
+  bgVideo.addEventListener('loadeddata', () => {
+    try { bgVideo.currentTime = 0; } catch (e) {}
+    bgVideo.pause();
     hasUserVideo = true;
-    $('#loadState').textContent = '已载入：' + f.name;
+    videoStarted = false;
+    $('#loadState').textContent = '已载入封面帧：' + f.name + '（撑满阈值后播放）';
     if (!camOn) setState('视频就绪', '现在点击“启用摄像头”开始', 'ok');
-  }).catch(() => {
-    bgVideo.muted = true;
-    bgVideo.play().catch(() => {});
-    hasUserVideo = true;
-    $('#loadState').textContent = '已载入（静音播放）：' + f.name;
-  });
+  }, { once: true });
+  bgVideo.load();
 });
 $('#demoVideo').addEventListener('click', () => {
   // 无本地文件时用内置测试视频
   bgVideo.src = 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
   bgVideo.loop = true; bgVideo.muted = true;
-  bgVideo.play().catch(() => {});
-  hasUserVideo = true;
-  $('#loadState').textContent = '已载入示例视频';
+  bgVideo.addEventListener('loadeddata', () => {
+    try { bgVideo.currentTime = 0; } catch (e) {}
+    bgVideo.pause();
+    hasUserVideo = true;
+    videoStarted = false;
+    $('#loadState').textContent = '已载入封面帧（撑满阈值后播放）';
+  }, { once: true });
+  bgVideo.load();
 });
 
 $('#start').addEventListener('click', start);
@@ -967,6 +994,7 @@ function exitFull() {
   targetFull = 0; fullMix = 0;
   targetReveal = 0; reveal = 0;
   smoothRect = null; mode = 'idle';
+  resetPlayback();
   glitch();
   setState('READY / 已退出全屏', '可重新比出矩形抠洞', 'ok');
 }
