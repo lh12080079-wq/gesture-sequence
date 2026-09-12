@@ -222,6 +222,7 @@ let mode = 'idle';            // idle | point | rect | full
 let reveal = 0, targetReveal = 0;   // 0..1 洞的张开度
 let fullMix = 0, targetFull = 0;    // 0..1 全屏混合
 let lastList = [];
+let holdList = [], holdAt = 0;   // 丢帧保持用
 let liveQuad = null;   // 当前四边形四点（屏幕坐标）
 let lastArea = 0;      // 最近一次的四边形占屏比例
 let diagTick = 0;
@@ -447,7 +448,7 @@ function drawBinaryUI(p, t) {
   }
 
   sctx.save();
-  sctx.font = '700 15px Consolas, monospace';
+  sctx.font = '700 17px Consolas, monospace';
   sctx.textBaseline = 'middle';
   sctx.textAlign = 'center';
 
@@ -493,10 +494,10 @@ function drawBinaryUI(p, t) {
     const py = q.y + ny * dist;
 
     const label = BIN_SEEDS[v % BIN_SEEDS.length];
-    sctx.font = '700 19px Consolas, monospace';
+    sctx.font = '700 22px Consolas, monospace';
     sctx.shadowColor = 'rgba(255,92,200,1)';
-    sctx.shadowBlur = 20;
-    sctx.fillStyle = 'rgba(255,225,245,.98)';
+    sctx.shadowBlur = 26;
+    sctx.fillStyle = 'rgba(255,235,250,1)';
     sctx.fillText(label, px, py);
     sctx.shadowBlur = 0;
 
@@ -1345,7 +1346,10 @@ async function start() {
         delegate: 'GPU'
       },
       runningMode: 'VIDEO', numHands: 2,
-      minHandDetectionConfidence: 0.5, minTrackingConfidence: 0.5, minHandPresenceConfidence: 0.5
+      // 降低检测门槛，减少单只手指令丢失
+      minHandDetectionConfidence: 0.35,
+      minTrackingConfidence: 0.35,
+      minHandPresenceConfidence: 0.35
     }), 30000);
     b.textContent = '摄像头已启用';
     setState('READY / 就绪', '双手食指+拇指比出矩形，撑满镜头后全屏播放', 'ok');
@@ -1358,8 +1362,15 @@ async function start() {
       prev = now;
       let raw = [];
       try { raw = landmarker.detectForVideo(cam, now).landmarks || []; } catch (e) { return; }
-      // 关键点平滑，消除抖动
-      const list = smoothLandmarks(raw, now);
+      // 手部丢帧保持：单帧丢手时沿用上一帧，避免特效闪断
+      let list;
+      if (raw.length === 0 && holdList.length && (now - holdAt) < 220) {
+        list = holdList;
+      } else {
+        list = smoothLandmarks(raw, now);
+        if (raw.length) { holdList = list.map(h => h.map(p => ({ x: p.x, y: p.y, z: p.z }))); holdAt = now; }
+        else holdList = [];
+      }
       onHands(list);
       drawSkeleton(list, mode === 'point');
       fps++;
@@ -1479,12 +1490,13 @@ function loop() {
   } else {
     renderMask();
     drawVideoFull();
+    drawSkeleton(lastList, mode === 'point' && !liveQuad);
     if (mode === 'fan' && fanApex && fanTips.length === 5) {
       drawFanUI(fanApex, fanTips, performance.now());
-    } else {
-      drawSkeleton(lastList, mode === 'point');
-      // 二进制数字交互反馈：跟随四点移动
-      if (liveQuad && liveQuad.length === 4) drawBinaryUI(liveQuad, performance.now());
+    }
+    // 二进制数字交互反馈：四边形模式下跟随四点移动
+    if (liveQuad && liveQuad.length === 4) {
+      drawBinaryUI(liveQuad, performance.now());
     }
   }
   drawHexGrid();
