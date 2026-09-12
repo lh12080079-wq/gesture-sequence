@@ -1047,12 +1047,12 @@ function onHands(list) {
       const c = clenchScore(list[i]), s = spreadScore(list[i]);
       list[i].__clench = c; list[i].__spread = s;
       // 同一只手不可能既攥紧又完全张开：要求分差明显
-      // 攥拳手：分数达标即可
-      if (c >= CLENCH_ON && c > bestCl && i !== si) { bestCl = c; ci = i; }
-      // 张开手：只要比攥拳分高、且不是攥拳那只手即可（不再要求张开分很高）
-      if (i !== ci && s >= c && c < CLENCH_ON && s > bestSp) { bestSp = s; si = i; }
+      // 攥拳手：攥拳分必须达标，且明显高于自身的张开分
+      if (c >= CLENCH_ON && c > s + 0.10 && c > bestCl) { bestCl = c; ci = i; }
+      // 张开手：张开分必须达标，且明显高于自身的攥拳分
+      if (s >= SPREAD_ON && s > c + 0.10 && s > bestSp) { bestSp = s; si = i; }
     }
-    // 强制互斥：两只手必须是同一只
+    // 必须分别是不同的两只手
     if (ci === si) { ci = -1; si = -1; }
     if (ci >= 0 && si >= 0) {
       const cp = clenchedPoint(list[ci]);
@@ -1071,7 +1071,6 @@ function onHands(list) {
       }
       return;
     }
-    mode = 'rect';
   }
 
   // 四边形模式：两手「其余六指全部收紧」+ 食指拇指张开，且需连续帧确认
