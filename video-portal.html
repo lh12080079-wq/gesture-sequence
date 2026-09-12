@@ -593,6 +593,7 @@ function tagNum(v, need) {
 const CLENCH_ON = 0.66, CLENCH_OFF = 0.45;
 const SPREAD_ON = 0.55, SPREAD_OFF = 0.35;
 let clenchLatched = false, spreadLatched = false;
+let fanHoldFrames = 0;   // 扇形保持帧数，容忍短暂丢失
 /* 分数的时间平滑：历史队列取平均，避免单帧波动 */
 const scoreHist = { clench: [[], []], spread: [[], []], curl: [[], []] };
 function smoothScore(kind, idx, v) {
@@ -1142,10 +1143,13 @@ function onHands(list) {
       const s = smoothScore('spread', i, spreadScore(list[i]));
       list[i].__clench = c; list[i].__spread = s;
       // 同一只手不可能既攥紧又完全张开：要求分差明显
-      // 攥拳手：攥拳分必须达标，且明显高于自身的张开分
-      if (c >= CLENCH_ON && c > s + 0.10 && c > bestCl) { bestCl = c; ci = i; }
-      // 张开手：张开分必须达标，且明显高于自身的攥拳分
-      if (s >= SPREAD_ON && s > c + 0.10 && s > bestSp) { bestSp = s; si = i; }
+      // 手指转动会让分数波动，所以用滞回：已在扇形时放宽进入条件
+      const relax = (mode === 'fan') ? 0.20 : 0;
+      const clNeed = CLENCH_ON - relax, spNeed = SPREAD_ON - relax;
+      // 攥拳手
+      if (c >= clNeed && c > s + (0.10 - relax * 0.5) && c > bestCl) { bestCl = c; ci = i; }
+      // 张开手
+      if (s >= spNeed && s > c + (0.10 - relax * 0.5) && s > bestSp) { bestSp = s; si = i; }
     }
     // 必须分别是不同的两只手
     if (ci === si) { ci = -1; si = -1; }
@@ -1158,12 +1162,25 @@ function onHands(list) {
         return { x: (1 - p.x) * CANVAS_W, y: p.y * CANVAS_H };
       });
       fanApex = apex; fanTips = tips;
+      // 已处于扇形时：直接维持，不再要求重新确认（避免转动时断续）
+      if (mode === 'fan') {
+        fanHoldFrames = 8;   // 保持若干帧，容忍瞬时丢失
+        setState('FAN / 4 三角形滤镜', '攥拳成点 · 另一手五指张开 → 4 个滤镜三角形', 'live');
+        return;
+      }
       if (confirmMode('fan')) {
         mode = 'fan';
+        fanHoldFrames = 8;
         pointPos = null; smoothRect = null; liveQuad = null;
         targetReveal = 0; targetFull = 0;
         setState('FAN / 4 三角形滤镜', '攥拳成点 · 另一手五指张开 → 4 个滤镜三角形', 'live');
       }
+      return;
+    }
+    // 扇形保持窗口：短暂不满足条件也不立即退出，避免转动时断续
+    if (mode === 'fan' && fanHoldFrames > 0) {
+      fanHoldFrames--;
+      setState('FAN / 4 三角形滤镜', '保持中…', 'live');
       return;
     }
   }
