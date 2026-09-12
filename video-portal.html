@@ -260,6 +260,7 @@ let reveal = 0, targetReveal = 0;   // 0..1 洞的张开度
 let fullMix = 0, targetFull = 0;    // 0..1 全屏混合
 let lastList = [];
 let holdList = [], holdAt = 0;   // 丢帧保持用
+let lastVideoTime = -1;           // 视频时间戳，用于跳过重复绘制
 let liveQuad = null;   // 当前四边形四点（屏幕坐标）
 let lastArea = 0;      // 最近一次的四边形占屏比例
 let diagTick = 0;
@@ -903,6 +904,11 @@ let warpTmp = null, warpTmpCtx = null;
 function drawVideoFull() {
   const W = vlayer.width, H = vlayer.height;
   if (!W || !H) return;
+  // 视频帧未更新且已绘制过，则跳过重绘（降低 GPU 负载）
+  const vt = bgVideo.currentTime;
+  if (vt === lastVideoTime && vlayer.dataset.drawn === '1') return;
+  lastVideoTime = vt;
+  vlayer.dataset.drawn = '1';
   vctx.setTransform(1, 0, 0, 1, 0, 0);
   vctx.filter = 'none';
   vctx.globalAlpha = 1;
@@ -915,17 +921,14 @@ function drawVideoFull() {
     const scale = Math.max(W / vw, H / vh);
     const dw = vw * scale, dh = vh * scale;
     const dx = (W - dw) / 2, dy = (H - dh) / 2;
-    // 用与摄像头层相同的镜像方式绘制，使两层坐标系完全一致
-    vctx.save();
-    vctx.translate(W, 0);
-    vctx.scale(-1, 1);
+    // 视频不镜像：保持原始方向
     vctx.drawImage(bgVideo, dx, dy, dw, dh);
-    vctx.restore();
   } else {
     vctx.fillStyle = '#05070e'; vctx.fillRect(0, 0, W, H);
+    vlayer.dataset.drawn = '0';
   }
 }
-function drawVideoWarp(q) {
+function drawVideoWarp_UNUSED(q) {
   drawVideoFull();
   return;
   if (warpCanvas.width !== W || warpCanvas.height !== H) {
@@ -1486,7 +1489,7 @@ async function start() {
       requestAnimationFrame(tick);
       if (cam.readyState < 2) return;
       const now = performance.now();
-      if (now - prev < 15) return;   // 约 60fps，提升跟随流畅度
+      if (now - prev < 12) return;   // 约 80fps 检测，减少丢帧
       prev = now;
       let raw = [];
       try { raw = landmarker.detectForVideo(cam, now).landmarks || []; } catch (e) { return; }
