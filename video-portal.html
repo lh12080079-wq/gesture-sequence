@@ -322,7 +322,8 @@ const flayer = $('#flayer'), fctx = flayer.getContext('2d');
 let CANVAS_W = 0, CANVAS_H = 0;
 function resizeSkel() {
   // 画布分辨率随性能档位缩放：低档降分辨率以保帧率
-  const dprBase = Math.min(devicePixelRatio || 1, 2);
+  // DPR 上限 1.5（原 2）：显著降低渲染负载，视觉差异极小
+  const dprBase = Math.min(devicePixelRatio || 1, 1.5);
   const dpr = Math.max(1, dprBase * (PERF.quality || 1));
   CANVAS_W = Math.round(innerWidth * dpr);
   CANVAS_H = Math.round(innerHeight * dpr);
@@ -1639,7 +1640,10 @@ function startRecording() {
 
   const stream = recCanvas.captureStream(60);   // 60fps 录制
   try {
-    recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 10000000 });
+    // 码率随画布尺寸自适应，避免小画布用高码率浪费性能
+  const px = recCanvas.width * recCanvas.height;
+  const bitrate = px > 2000000 ? 10000000 : (px > 900000 ? 6000000 : 3500000);
+  recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: bitrate });
   } catch (e) {
     showErr('录制初始化失败：' + e.message);
     return;
@@ -1717,7 +1721,7 @@ async function start() {
   try {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('此浏览器不支持摄像头');
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'user', width: 1280, height: 720 }, audio: false });
+      video: { facingMode: 'user', width: 960, height: 540 }, audio: false });
     cam.srcObject = stream; await cam.play();
     camOn = true; resizeSkel();
     setState('摄像头已开启', '正在加载手部模型', 'ok');
@@ -1801,29 +1805,51 @@ $('#file').addEventListener('change', e => {
   const f = e.target.files && e.target.files[0];
   if (!f) return;
   const url = URL.createObjectURL(f);
+  // 载入新视频前：彻底重置状态，避免沿用旧视频的绘制标记导致黑屏
+  try { bgVideo.pause(); } catch (e) {}
+  bgVideo.removeAttribute('src');
+  bgVideo.load();
+  lastVideoTime = -1;
+  if (vlayer && vlayer.dataset) vlayer.dataset.drawn = '0';
+  videoStarted = false;
+
   bgVideo.src = url;
   bgVideo.loop = true; bgVideo.muted = true;
-  // 只加载到第一帧，暂停等待触发阈值后再播放
-  bgVideo.addEventListener('loadeddata', () => {
+  bgVideo.load();
+
+  const onReady = () => {
     try { bgVideo.currentTime = 0; } catch (e) {}
     bgVideo.pause();
     hasUserVideo = true;
     videoStarted = false;
-    $('#loadState').textContent = '已载入封面帧：' + f.name + '（撑满阈值后播放）';
+    lastVideoTime = -1;
+    if (vlayer && vlayer.dataset) vlayer.dataset.drawn = '0';
+    $('#loadState').textContent = '已载入：' + f.name + '（' + bgVideo.videoWidth + 'x' + bgVideo.videoHeight + '）';
     if (!camOn) setState('视频就绪', '现在点击“启用摄像头”开始', 'ok');
-  }, { once: true });
-  bgVideo.load();
+  };
+  if (bgVideo.readyState >= 2) onReady();
+  else {
+    bgVideo.addEventListener('loadeddata', onReady, { once: true });
+    bgVideo.addEventListener('error', () => {
+      $('#loadState').textContent = '视频载入失败：格式可能不被浏览器支持';
+    }, { once: true });
+  }
 });
 $('#demoVideo').addEventListener('click', () => {
   // 无本地文件时用内置测试视频
+  try { bgVideo.pause(); } catch (e) {}
+  lastVideoTime = -1;
+  if (vlayer && vlayer.dataset) vlayer.dataset.drawn = '0';
+  videoStarted = false;
   bgVideo.src = 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
   bgVideo.loop = true; bgVideo.muted = true;
   bgVideo.addEventListener('loadeddata', () => {
     try { bgVideo.currentTime = 0; } catch (e) {}
     bgVideo.pause();
-    hasUserVideo = true;
-    videoStarted = false;
-    $('#loadState').textContent = '已载入封面帧（撑满阈值后播放）';
+    hasUserVideo = true; videoStarted = false;
+    lastVideoTime = -1;
+    if (vlayer && vlayer.dataset) vlayer.dataset.drawn = '0';
+    $('#loadState').textContent = '已载入示例视频';
   }, { once: true });
   bgVideo.load();
 });
