@@ -206,9 +206,9 @@ function tipsOf(lm) { return [4, 8, 12, 16, 20].map(i => lm[i]); }
 /* 握拳：五指弯曲收拢，指尖贴近掌心 */
 function isFist(lm) {
   const palm = lm[9], r = scaleOf(lm);
-  // 更严格：四指指尖都要紧贴掌心，且拇指也收拢
-  const fingers = [8, 12, 16, 20].every(i => d2(lm[i], palm) < r * 0.95);
-  const thumb = d2(lm[4], palm) < r * 1.15;
+  // 四指指尖收拢贴近掌心，拇指同样收拢（阈值放宽到 1.05）
+  const fingers = [8, 12, 16, 20].every(i => d2(lm[i], palm) < r * 1.05);
+  const thumb = d2(lm[4], palm) < r * 1.25;
   return fingers && thumb;
 }
 
