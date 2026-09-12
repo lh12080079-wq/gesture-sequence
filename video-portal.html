@@ -662,10 +662,21 @@ function clenchScore(lm) {
   );
 }
 function spreadScore(lm) {
-  const palm = lm[9], r = scaleOf(lm);
-  const out = [8, 12, 16, 20].filter(i => d2(lm[i], palm) > r * 1.7).length;
-  const thumb = d2(lm[4], palm) > r * 1.3 ? 1 : 0;
-  return clamp01((out + thumb) / 5);
+  const palm = palmOf(lm), r = scaleOf(lm);
+  const TIPS = [4, 8, 12, 16, 20];
+  // ① 指尖到掌心的距离（用 3D，抗朝向变化）
+  const out = [8, 12, 16, 20].filter(i => d3(lm[i], palm) / r > 1.5).length;
+  const thumb = d3(lm[4], palm) / r > 1.1 ? 1 : 0;
+  const reach = clamp01((out + thumb) / 5);
+  // ② 指尖彼此分散度（手掌转正也稳定）
+  let area = 0;
+  for (let i = 0; i < TIPS.length; i++) {
+    const a = lm[TIPS[i]], b = lm[TIPS[(i + 1) % TIPS.length]];
+    area += (a.x * b.y - b.x * a.y);
+  }
+  area = Math.abs(area) / 2 / (r * r);          // 归一化
+  const spread = clamp01(area / 2.2);
+  return clamp01(reach * 0.6 + spread * 0.4);
 }
 function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
 /* 诊断用：达标显示绿色，未达标显示橙色 */
@@ -897,20 +908,27 @@ function renderFanFilters() {
     }
     fxctx.filter = 'none';
 
-    // 2) 用三角形裁剪，把滤镜帧贴到独立滤镜层（在摄像头之上）
+    // 2) 用三角形裁剪，把滤镜帧贴到独立滤镜层
+    //    第一个三角形正常绘制，后续用 lighter 叠加 —— 重叠区域颜色自然融合
     fctx.save();
-    fctx.globalAlpha = fanAlpha;
     fctx.beginPath();
     fctx.moveTo(A.x, A.y); fctx.lineTo(B.x, B.y); fctx.lineTo(C.x, C.y);
     fctx.closePath();
     fctx.clip();
-    fctx.globalCompositeOperation = 'source-over';
+    if (i === 0) {
+      fctx.globalAlpha = fanAlpha;
+      fctx.globalCompositeOperation = 'source-over';
+    } else {
+      // 后续三角形半透明叠加：重叠处颜色更浓，形成层次
+      fctx.globalAlpha = fanAlpha * 0.75;
+      fctx.globalCompositeOperation = 'lighter';
+    }
     fctx.drawImage(fxCanvas, 0, 0);
 
-    // 3) 叠加色调，强化滤镜差异
+    // 3) 叠加色调，强化每个三角形的色彩特征
     const col = ['rgba(57,230,255,', 'rgba(255,92,200,', 'rgba(255,180,60,', 'rgba(170,90,255,'][i];
     fctx.globalCompositeOperation = 'lighter';
-    fctx.fillStyle = col + '0.10)';
+    fctx.fillStyle = col + '0.12)';
     fctx.fillRect(0, 0, W, H);
     fctx.restore();
   }
@@ -1335,12 +1353,14 @@ function onHands(list) {
       list[i].__clench = c; list[i].__spread = s;
       // 同一只手不可能既攥紧又完全张开：要求分差明显
       // 手指转动会让分数波动，所以用滞回：已在扇形时放宽进入条件
-      const relax = (mode === 'fan') ? 0.20 : 0;
+      const relax = (mode === 'fan') ? 0.25 : 0;
       const clNeed = CLENCH_ON - relax, spNeed = SPREAD_ON - relax;
-      // 攥拳手
-      if (c >= clNeed && c > s + (0.10 - relax * 0.5) && c > bestCl) { bestCl = c; ci = i; }
-      // 张开手
-      if (s >= spNeed && s > c + (0.10 - relax * 0.5) && s > bestSp) { bestSp = s; si = i; }
+      // 手转正时 z 深度变化会让两个分数同时波动，因此不再强制要求分差
+      const margin = (mode === 'fan') ? 0 : 0.03;
+      // 攥拳手：分数达标即可
+      if (c >= clNeed && c > s + margin && c > bestCl) { bestCl = c; ci = i; }
+      // 张开手：分数达标即可
+      if (s >= spNeed && s > c + margin && s > bestSp) { bestSp = s; si = i; }
     }
     // 必须分别是不同的两只手
     if (ci === si) { ci = -1; si = -1; }
