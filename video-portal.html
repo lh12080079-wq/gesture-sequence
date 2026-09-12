@@ -1515,8 +1515,10 @@ function detectDeviceTier() {
   return tier;
 }
 PERF.level = detectDeviceTier();
-PERF.detectMs = [24, 18, 14, 10][PERF.level];   // 对应目标帧率 42/56/71/100
-PERF.quality = [0.6, 0.75, 0.9, 1.0][PERF.level];
+// 目标锁定 60fps：检测间隔 16ms
+PERF.detectMs = 16;
+PERF.quality = 1.0;
+const TARGET_FPS = 60;
 
 /* 运行时反馈调节：连续偏低就降档，持续很高就升档 */
 function adjustPerformance(fps) {
@@ -1526,17 +1528,14 @@ function adjustPerformance(fps) {
   if (PERF.fpsSamples.length > 3) PERF.fpsSamples.shift();
   const avg = PERF.fpsSamples.reduce((a, b) => a + b, 0) / PERF.fpsSamples.length;
   PERF.fpsAvg = avg;
-  const target = [30, 42, 56, 70][PERF.level];
-  // 明显低于目标 → 降档
-  if (avg < target * 0.72 && PERF.level > 0) {
-    PERF.level--; PERF.lastAdjust = now; PERF.fpsSamples = [];
-  }
-  // 明显高于目标 → 升档
-  else if (avg > target * 1.25 && PERF.level < 3) {
-    PERF.level++; PERF.lastAdjust = now; PERF.fpsSamples = [];
+  // 目标 60fps：低于 45 才降质量保流畅，高于 58 恢复满质量
+  if (avg < 45 && PERF.quality > 0.6) {
+    PERF.quality = Math.max(0.6, PERF.quality - 0.15);
+    PERF.lastAdjust = now; PERF.fpsSamples = [];
+  } else if (avg > 58 && PERF.quality < 1.0) {
+    PERF.quality = Math.min(1.0, PERF.quality + 0.15);
+    PERF.lastAdjust = now; PERF.fpsSamples = [];
   } else return;
-  PERF.detectMs = [24, 18, 14, 10][PERF.level];
-  PERF.quality = [0.6, 0.75, 0.9, 1.0][PERF.level];
   if (diagEl) diagEl.dataset.perf = 'L' + PERF.level;
   // 画布分辨率随档位变化，需重建
   try { resizeSkel(); } catch (e) {}
@@ -1564,13 +1563,19 @@ function startRecording() {
     return;
   }
   // 选择支持的编码格式
-  const types = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'];
+  // 优先 MP4（微信可直接播放），其次 WebM
+  const types = [
+    'video/mp4;codecs=avc1.42E01E', 'video/mp4;codecs=h264',
+    'video/mp4', 'video/mp4;codecs=avc1',
+    'video/webm;codecs=h264', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'
+  ];
   const mime = types.find(t => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t));
   if (!mime) { showErr('浏览器不支持可用的视频编码格式'); return; }
+  const isMp4 = mime.indexOf('mp4') >= 0;
 
-  const stream = recCanvas.captureStream(30);
+  const stream = recCanvas.captureStream(60);   // 60fps 录制
   try {
-    recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 6000000 });
+    recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 10000000 });
   } catch (e) {
     showErr('录制初始化失败：' + e.message);
     return;
@@ -1584,7 +1589,8 @@ function startRecording() {
     const d = new Date();
     const pad = n => String(n).padStart(2, '0');
     a.download = 'gesture-' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) +
-      '-' + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds()) + '.webm';
+      '-' + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds()) +
+      (isMp4 ? '.mp4' : '.webm');
     a.href = url; a.click();
     setTimeout(() => URL.revokeObjectURL(url), 4000);
     $('#rec').textContent = '开始录制';
