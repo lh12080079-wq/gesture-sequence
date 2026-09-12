@@ -107,6 +107,28 @@
     border-radius:11px;padding:13px 16px;backdrop-filter:blur(12px);pointer-events:none}
   #guide b{color:#eafcff}#guide .k{color:#39e6ff}#guide .p{color:#ff7ad0}
 
+
+  /* ---------- 可隐藏面板 + 触摸图标 ---------- */
+  .tg{position:fixed;z-index:14;width:38px;height:38px;border-radius:9px;
+    display:flex;align-items:center;justify-content:center;cursor:pointer;
+    font-size:16px;font-family:Consolas,monospace;color:#9fe6ff;
+    background:rgba(6,18,34,.78);border:1px solid rgba(57,230,255,.42);
+    backdrop-filter:blur(10px);transition:all .22s;user-select:none;
+    box-shadow:0 0 14px rgba(57,230,255,.25)}
+  .tg:hover,.tg:active{background:rgba(20,60,110,.9);border-color:rgba(255,92,200,.7);
+    box-shadow:0 0 22px rgba(57,230,255,.6);transform:scale(1.08)}
+  .tg.on{color:#ffd0f0;border-color:rgba(255,92,200,.8);
+    background:rgba(60,12,45,.85);box-shadow:0 0 22px rgba(255,92,200,.5)}
+  .tg-tl{top:calc(14px + env(safe-area-inset-top));left:14px}
+  .tg-tr{top:calc(14px + env(safe-area-inset-top));right:14px}
+  .tg-tr2{top:calc(60px + env(safe-area-inset-top));right:14px}
+  .tg-tc{top:calc(14px + env(safe-area-inset-top));left:50%;transform:translateX(-50%)}
+  .tg-tc:hover,.tg-tc:active{transform:translateX(-50%) scale(1.08)}
+  .tg-bl{bottom:calc(14px + env(safe-area-inset-bottom));left:14px}
+  .tg-br{bottom:calc(14px + env(safe-area-inset-bottom));right:14px}
+
+  .panel{transition:opacity .26s ease, transform .26s ease}
+  .panel.collapsed{opacity:0;transform:scale(.94);pointer-events:none;visibility:hidden}
   #err,#boot{position:fixed;z-index:20;left:50%;top:50%;transform:translate(-50%,-50%);max-width:78vw;
     padding:20px 24px;border-radius:13px;background:rgba(34,6,20,.95);
     border:1px solid rgba(255,92,200,.55);color:#ffd0ea;font-size:12px;line-height:1.75;
@@ -135,7 +157,8 @@
 
 <div id="grid"></div><div id="scan"></div><div id="noise"></div><div id="vign"></div>
 
-<div id="hud">
+<div id="hudToggle" class="tg tg-tl">◈</div>
+<div id="hud" class="panel collapsed">
   <h1>VIDEO PORTAL</h1>
   <div class="sub">HAND-FRAMED HOLE / CAMERA + VIDEO</div>
   <div id="state">STANDBY</div>
@@ -143,12 +166,20 @@
   <div id="loadState">未载入视频</div>
 </div>
 
-<div id="fullbar">
+<div id="binToggle" class="tg tg-tr">01</div>
+<div id="bin" class="panel collapsed"><span class="lbl">DATA STREAM</span><span id="binText">0101011010010110</span></div>
+
+<div id="binToggle" class="tg tg-tr">01</div>
+<div id="bin" class="panel collapsed"><span class="lbl">DATA STREAM</span><span id="binText">0101011010010110</span></div>
+
+<div id="fullbarToggle" class="tg tg-tc">▮</div>
+<div id="fullbar" class="panel collapsed">
   <div class="lbl">FULLSCREEN PROGRESS (65%)</div>
   <div class="track"><div class="fill2"></div></div>
 </div>
 
-<div id="tuner">
+<div id="tunerToggle" class="tg tg-tr2">⚙</div>
+<div id="tuner" class="panel collapsed">
   <div class="row2">
     <span class="lab">触发阈值</span>
     <span class="val" id="thVal">65%</span>
@@ -161,10 +192,12 @@
   <input id="fw" type="range" min="0" max="24" step="1" value="8">
 </div>
 
-<div id="diag"></div>
+<div id="diagToggle" class="tg tg-bl">▤</div>
+<div id="diag" class="panel collapsed"></div>
 <div id="hint"></div>
 
-<div id="guide">
+<div id="guideToggle" class="tg tg-br">?</div>
+<div id="guide" class="panel collapsed">
   <b>玩法</b><br>
   <span class="p">扇形滤镜</span>：一手攥拳·一手张开五指<br>
   <span class="k">点→五指辐射</span> → 夹出 4 个三角形<br>
@@ -1639,6 +1672,30 @@ function loop() {
 loop();
 resizeSkel();
 diagEl = document.getElementById('diag');
+
+/* ---------- 面板显示/隐藏 ---------- */
+const PANELS = [
+  ['hudToggle', 'hud'],
+  ['binToggle', 'bin'],
+  ['fullbarToggle', 'fullbar'],
+  ['tunerToggle', 'tuner'],
+  ['diagToggle', 'diag'],
+  ['guideToggle', 'guide']
+];
+PANELS.forEach(([tgId, pId]) => {
+  const tg = document.getElementById(tgId);
+  const pn = document.getElementById(pId);
+  if (!tg || !pn) return;
+  const toggle = (e) => {
+    if (e) e.stopPropagation();
+    const open = pn.classList.toggle('collapsed') === false;
+    tg.classList.toggle('on', open);
+  };
+  tg.addEventListener('click', toggle);
+  // 触摸设备同样响应
+  tg.addEventListener('touchstart', (e) => { e.preventDefault(); toggle(e); }, { passive: false });
+});
+
 
 /* 若用户未主动载入视频，自动载入示例视频，保证滤镜/抠洞有画面可用 */
 setTimeout(() => {
