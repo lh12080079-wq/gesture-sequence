@@ -134,6 +134,10 @@
     padding:9px 13px;backdrop-filter:blur(10px)}
   #bin .lbl{color:#39e6ff;font-size:9px;display:block;margin-bottom:4px}
 
+  /* 骨架开关关闭态 */
+  #skelBtn.off{opacity:.55;border-color:rgba(120,150,180,.5);color:#8aa4bd;
+    background:linear-gradient(180deg,rgba(26,36,52,.7),rgba(12,18,30,.85))}
+
   /* ---------- 录制 ---------- */
   #rec.on{background:linear-gradient(180deg,rgba(190,30,70,.9),rgba(90,10,35,.95));
     border-color:rgba(255,90,140,.9);box-shadow:0 0 22px rgba(255,60,120,.6)}
@@ -237,6 +241,7 @@
   <button id="demoVideo">示例视频</button>
   <button id="exitFull" style="display:none">退出全屏</button>
   <button id="rec">开始录制</button>
+  <button id="skelBtn">骨架线：开</button>
 </div>
 <div id="recDot"><span></span>REC <b id="recTime">00:00</b></div>
 <input id="file" type="file" accept="video/*" style="display:none">
@@ -278,6 +283,7 @@ let mode = 'idle';            // idle | point | rect | full
 let reveal = 0, targetReveal = 0;   // 0..1 洞的张开度
 let fullMix = 0, targetFull = 0;    // 0..1 全屏混合
 let lastList = [];
+let SHOW_SKELETON = true;   // 骨架节点线显示开关
 let holdList = [], holdAt = 0;   // 丢帧保持用
 let lastVideoTime = -1;           // 视频时间戳，用于跳过重复绘制
 let liveQuad = null;   // 当前四边形四点（屏幕坐标）
@@ -384,6 +390,7 @@ function isFist(lm) {
 
 /* ---------- 骨架绘制 ---------- */
 function drawSkeleton(list, hasPoint) {
+  if (!SHOW_SKELETON) return;   // 骨架线开关关闭时跳过
   resizeSkel();
   sctx.clearRect(0, 0, skel.width, skel.height);
   if (!list.length) return;
@@ -506,6 +513,7 @@ refreshBinTags();
 
 function drawBinaryUI(p, t) {
   if (!p || p.length !== 4) return;
+  if (!SHOW_SKELETON) return;   // 与骨架线共用同一个开关
   // 低性能设备简化数字层
   const simple = PERF.level <= 1;
   binPhase += 0.016;
@@ -762,6 +770,7 @@ let fanTips = [];
 
 function drawFanUI(apex, tips, t) {
   if (!apex || !tips || tips.length < 5) return;
+  if (!SHOW_SKELETON) return;   // 与骨架线共用同一个开关
   sctx.save();
 
   for (let i = 0; i < 4; i++) {
@@ -1644,6 +1653,17 @@ function stopRecording() {
 }
 $('#rec').addEventListener('click', () => { recorder ? stopRecording() : startRecording(); });
 
+/* ---------- 骨架节点线开关 ---------- */
+$('#skelBtn').addEventListener('click', () => {
+  SHOW_SKELETON = !SHOW_SKELETON;
+  $('#skelBtn').textContent = '骨架线：' + (SHOW_SKELETON ? '开' : '关');
+  $('#skelBtn').classList.toggle('off', !SHOW_SKELETON);
+  if (!SHOW_SKELETON) {
+    // 立即清空已绘制的骨架与数字层
+    if (skel.width) sctx.clearRect(0, 0, skel.width, skel.height);
+  }
+});
+
 /* 每帧把最终画面合成到录制画布 */
 function captureFrame() {
   if (!recorder || !recCanvas) return;
@@ -1832,7 +1852,7 @@ function loop() {
     if (maskCanvas.width) mctx.setTransform(1, 0, 0, 1, 0, 0), mctx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
     if (skel.width) sctx.clearRect(0, 0, skel.width, skel.height);
     if (flayer.width) fctx.clearRect(0, 0, flayer.width, flayer.height);
-    drawVideoFull();
+    drawVideoFull();   // 全屏时只显示视频
   } else if (isFull) {
     // 动画进行中：继续渲染挖洞（洞口正在撑满），同时淡出摄像头
     renderMask();
