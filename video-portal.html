@@ -45,7 +45,7 @@
     background:radial-gradient(ellipse at 50% 50%,transparent 45%,rgba(3,4,10,.75) 100%)}
 
   /* HUD */
-  #hud{position:fixed;z-index:9;top:calc(18px + env(safe-area-inset-top));left:20px;pointer-events:none;letter-spacing:.14em}
+  #hud{position:fixed;z-index:9;top:calc(62px + env(safe-area-inset-top));left:14px;pointer-events:none;letter-spacing:.14em}
   #hud h1{font-size:13px;font-weight:700;color:#eafcff;text-shadow:0 0 16px rgba(57,230,255,.9)}
   #hud .sub{margin-top:4px;font-size:9px;color:#4d7fa8;letter-spacing:.18em}
   #state{margin-top:11px;font-size:11px;color:#7cf0d0;text-shadow:0 0 14px rgba(60,240,200,.7)}
@@ -55,7 +55,7 @@
   #meta{margin-top:6px;font-size:9px;color:#5c7fa8;display:flex;gap:12px;flex-wrap:wrap}
   #loadState{margin-top:6px;font-size:9px;color:#8fb0dd;max-width:46vw;word-break:break-all}
 
-  #diag{position:fixed;z-index:11;left:20px;bottom:calc(18px + env(safe-area-inset-bottom));
+  #diag{position:fixed;z-index:11;left:14px;bottom:calc(62px + env(safe-area-inset-bottom));
     font-size:11px;line-height:1.8;color:#9fe6ff;background:rgba(4,12,24,.86);
     border:1px solid rgba(57,230,255,.35);border-radius:9px;padding:9px 13px;
     font-family:Consolas,monospace;letter-spacing:.04em;pointer-events:none;white-space:pre}
@@ -66,7 +66,7 @@
     padding:9px 20px;backdrop-filter:blur(10px);pointer-events:none;opacity:0;transition:opacity .35s;text-align:center}
   #hint.on{opacity:1}
 
-  #fullbar{position:fixed;z-index:9;left:50%;top:calc(18px + env(safe-area-inset-top));transform:translateX(-50%);
+  #fullbar{position:fixed;z-index:9;left:50%;top:calc(64px + env(safe-area-inset-top));transform:translateX(-50%);
     width:min(320px,52vw);pointer-events:none;opacity:0;transition:opacity .4s}
   #fullbar .lbl{font-size:9px;color:#ff7ad0;letter-spacing:.2em;text-align:center;margin-bottom:5px;
     text-shadow:0 0 12px rgba(255,92,200,.8)}
@@ -84,7 +84,7 @@
     box-shadow:0 0 22px rgba(57,230,255,.5);border-color:rgba(255,92,200,.6)}
   button:disabled{opacity:.45;cursor:default}
 
-  #tuner{position:fixed;z-index:10;right:20px;top:calc(18px + env(safe-area-inset-top));
+  #tuner{position:fixed;z-index:10;right:14px;top:calc(110px + env(safe-area-inset-top));
     width:236px;background:rgba(6,14,28,.66);border:1px solid rgba(57,230,255,.26);
     border-radius:11px;padding:12px 15px;backdrop-filter:blur(12px);
     box-shadow:0 0 24px rgba(57,230,255,.12)}
@@ -101,7 +101,7 @@
     background:repeating-linear-gradient(180deg,rgba(255,60,160,.16) 0 2px,transparent 2px 5px);
     mix-blend-mode:screen;transition:opacity .12s}
   #hex{position:fixed;inset:0;z-index:6;pointer-events:none;opacity:.16}
-  #guide{position:fixed;z-index:9;right:20px;bottom:calc(18px + env(safe-area-inset-bottom));
+  #guide{position:fixed;z-index:12;right:14px;bottom:calc(62px + env(safe-area-inset-bottom));
     width:252px;font-size:10px;line-height:1.9;color:#8fc4e8;
     background:rgba(6,14,28,.62);border:1px solid rgba(57,230,255,.24);
     border-radius:11px;padding:13px 16px;backdrop-filter:blur(12px);pointer-events:none}
@@ -121,12 +121,18 @@
     background:rgba(60,12,45,.85);box-shadow:0 0 22px rgba(255,92,200,.5)}
   .tg-tl{top:calc(14px + env(safe-area-inset-top));left:14px}
   .tg-tr{top:calc(14px + env(safe-area-inset-top));right:14px}
-  .tg-tr2{top:calc(60px + env(safe-area-inset-top));right:14px}
+  .tg-tr2{top:calc(62px + env(safe-area-inset-top));right:14px}
   .tg-tc{top:calc(14px + env(safe-area-inset-top));left:50%;transform:translateX(-50%)}
   .tg-tc:hover,.tg-tc:active{transform:translateX(-50%) scale(1.08)}
   .tg-bl{bottom:calc(14px + env(safe-area-inset-bottom));left:14px}
   .tg-br{bottom:calc(14px + env(safe-area-inset-bottom));right:14px}
 
+  #bin{position:fixed;z-index:10;right:14px;top:calc(120px + env(safe-area-inset-top));
+    text-align:right;font-size:11px;color:#ff7ad0;letter-spacing:.16em;pointer-events:none;
+    text-shadow:0 0 14px rgba(255,92,200,.85);word-break:break-all;max-width:44vw;
+    background:rgba(6,14,28,.66);border:1px solid rgba(255,92,200,.3);border-radius:10px;
+    padding:9px 13px;backdrop-filter:blur(10px)}
+  #bin .lbl{color:#39e6ff;font-size:9px;display:block;margin-bottom:4px}
   .panel{transition:opacity .26s ease, transform .26s ease}
   .panel.collapsed{opacity:0;transform:scale(.94);pointer-events:none;visibility:hidden}
   #err,#boot{position:fixed;z-index:20;left:50%;top:50%;transform:translate(-50%,-50%);max-width:78vw;
@@ -1296,26 +1302,33 @@ function onHands(list) {
       fanLastTri = fanTriangles;
       // 已处于扇形时：直接维持，不再要求重新确认（避免转动时断续）
       if (mode === 'fan') {
-        fanHoldFrames = 20;
+        fanHoldFrames = 45;
         setState('FAN / 4 三角形滤镜', '攥拳成点 · 另一手五指张开 → 4 个滤镜三角形', 'live');
         return;
       }
       if (confirmMode('fan') && canSwitch('fan')) {
         enterMode('fan');
-        fanHoldFrames = 20;
+        fanHoldFrames = 45;
         pointPos = null; smoothRect = null; liveQuad = null;
         targetReveal = 0; targetFull = 0;
         setState('FAN / 4 三角形滤镜', '攥拳成点 · 另一手五指张开 → 4 个滤镜三角形', 'live');
       }
       return;
     }
-    // 扇形保持窗口：短暂不满足条件也维持滤镜，避免闪烁消失
-    if (mode === 'fan' && fanHoldFrames > 0) {
+    // 扇形保持窗口：条件不满足时继续维持滤镜，避免转动时丢失
+    if (mode === 'fan') {
       fanHoldFrames--;
-      // 沿用上一次的三角形位置，画面不跳变
-      if (fanLastTri.length) fanTriangles = fanLastTri;
-      setState('FAN / 4 三角形滤镜', '保持中…', 'live');
-      return;
+      if (fanLastTri.length) fanTriangles = fanLastTri;   // 沿用上次位置
+      if (fanHoldFrames > 0) {
+        setState('FAN / 4 三角形滤镜', '保持中…', 'live');
+        return;
+      }
+      // 保持帧耗尽仍未恢复：才真正退出
+      if (fanHoldFrames <= 0) {
+        enterMode('idle');
+        fanTriangles = []; fanLastTri = [];
+        targetReveal = 0;
+      }
     }
   }
 
