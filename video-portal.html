@@ -305,12 +305,11 @@ function drawSkeleton(list, hasPoint) {
       sctx.beginPath(); sctx.arc(q.x, q.y, 1.8, 0, Math.PI * 2); sctx.fill();
     }
 
-    // 其余三指：收拢时几乎不显示（说明没被使用）
+    // 其余三指：常规显示
     for (const i of [12, 16, 20]) {
       const q = pt(lm[i]);
-      const used = !isFrameHand(lm);
-      sctx.fillStyle = used ? CYAN + '.75)' : CYAN + '.25)';
-      sctx.beginPath(); sctx.arc(q.x, q.y, used ? 4 : 2.4, 0, Math.PI * 2); sctx.fill();
+      sctx.fillStyle = CYAN + '.7)';
+      sctx.beginPath(); sctx.arc(q.x, q.y, 3.6, 0, Math.PI * 2); sctx.fill();
     }
 
     // 四个关键点：食指(8) 与 拇指(4)，用粉色高亮加光环
@@ -351,7 +350,7 @@ function drawSkeleton(list, hasPoint) {
   }
 
   // 四边形框：完全由两手的食指(8)与拇指(4)这四点构成
-  if (mode === 'rect' && list[0] && list[1] && isFrameHand(list[0]) && isFrameHand(list[1])) {
+  if (mode === 'rect' && list[0] && list[1]) {
     const a = list[0], b = list[1];
     const p = projectRect(a, b);
     sctx.strokeStyle = CYAN + '.95)'; sctx.lineWidth = 3.4;
@@ -386,6 +385,83 @@ function computeRectGeo(a, b) {
   }
   const area = Math.abs(area2) / 2;
   return { cx, cy, area, pts: p };
+}
+
+
+/* ---------- 视频透视贴合到四边形 ---------- */
+/* 用重心坐标把四边形纹理映射到屏幕，等价于单应变换 */
+const warpCanvas = document.createElement('canvas');
+const wctx = warpCanvas.getContext('2d');
+let warpTmp = null, warpTmpCtx = null;
+function drawVideoWarp(q) {
+  const W = maskCanvas.width, H = maskCanvas.height;
+  if (warpCanvas.width !== W || warpCanvas.height !== H) {
+    warpCanvas.width = W; warpCanvas.height = H;
+  }
+  // 源视频降采样，保证 30fps 下的映射开销可控
+  const sw = 160, sh = Math.max(2, Math.round(sw * (bgVideo.videoHeight / bgVideo.videoWidth || 0.5625)));
+  if (!warpTmp) { warpTmp = document.createElement('canvas'); warpTmpCtx = warpTmp.getContext('2d'); }
+  if (warpTmp.width !== sw || warpTmp.height !== sh) { warpTmp.width = sw; warpTmp.height = sh; }
+  warpTmpCtx.drawImage(bgVideo, 0, 0, sw, sh);
+  const src = warpTmpCtx.getImageData(0, 0, sw, sh).data;
+
+  // 目标四边形包围盒
+  const minX = Math.max(0, Math.floor(Math.min(q[0].x, q[1].x, q[2].x, q[3].x)));
+  const maxX = Math.min(W, Math.ceil(Math.max(q[0].x, q[1].x, q[2].x, q[3].x)));
+  const minY = Math.max(0, Math.floor(Math.min(q[0].y, q[1].y, q[2].y, q[3].y)));
+  const maxY = Math.min(H, Math.ceil(Math.max(q[0].y, q[1].y, q[2].y, q[3].y)));
+  const bw = maxX - minX, bh = maxY - minY;
+  if (bw <= 2 || bh <= 2) return;
+
+  wctx.clearRect(0, 0, W, H);
+  const img = wctx.createImageData(bw, bh);
+  const out = img.data;
+
+  // 四边形顶点顺序：p0 左上(左手食指) p1 右上(右手食指) p2 右下(右手拇指) p3 左下(左手拇指)
+  const inQuad = (x, y) => {
+    let s = 0;
+    for (let i = 0; i < 4; i++) {
+      const A = q[i], B = q[(i + 1) % 4];
+      const cross = (B.x - A.x) * (y - A.y) - (B.y - A.y) * (x - A.x);
+      if (cross > 0) s++; else if (cross < 0) s--;
+    }
+    return Math.abs(s) === 4;
+  };
+  // 双线性反解：给定屏幕点求四边形内的 (u,v)
+  const solveUV = (px, py) => {
+    let u = 0.5, v = 0.5;
+    for (let it = 0; it < 8; it++) {
+      const ax = q[0].x + (q[1].x - q[0].x) * u + (q[3].x - q[0].x) * v + (q[0].x - q[1].x + q[2].x - q[3].x) * u * v;
+      const ay = q[0].y + (q[1].y - q[0].y) * u + (q[3].y - q[0].y) * v + (q[0].y - q[1].y + q[2].y - q[3].y) * u * v;
+      const ex = px - ax, ey = py - ay;
+      const j11 = (q[1].x - q[0].x) + (q[0].x - q[1].x + q[2].x - q[3].x) * v;
+      const j12 = (q[3].x - q[0].x) + (q[0].x - q[1].x + q[2].x - q[3].x) * u;
+      const j21 = (q[1].y - q[0].y) + (q[0].y - q[1].y + q[2].y - q[3].y) * v;
+      const j22 = (q[3].y - q[0].y) + (q[0].y - q[1].y + q[2].y - q[3].y) * u;
+      const det = j11 * j22 - j12 * j21;
+      if (Math.abs(det) < 1e-6) break;
+      u += (j22 * ex - j12 * ey) / det;
+      v += (-j21 * ex + j11 * ey) / det;
+    }
+    return [u, v];
+  };
+
+  for (let y = 0; y < bh; y++) {
+    const py = minY + y;
+    for (let x = 0; x < bw; x++) {
+      const px = minX + x;
+      if (!inQuad(px, py)) continue;
+      const uv = solveUV(px, py);
+      if (uv[0] < 0 || uv[0] > 1 || uv[1] < 0 || uv[1] > 1) continue;
+      const sx = Math.min(sw - 1, Math.max(0, Math.round(uv[0] * (sw - 1))));
+      const sy = Math.min(sh - 1, Math.max(0, Math.round(uv[1] * (sh - 1))));
+      const si = (sy * sw + sx) * 4, di = (y * bw + x) * 4;
+      out[di] = src[si]; out[di + 1] = src[si + 1]; out[di + 2] = src[si + 2];
+      out[di + 3] = 255;
+    }
+  }
+  wctx.putImageData(img, minX, minY);
+  mctx.drawImage(warpCanvas, 0, 0);
 }
 
 /* ---------- 遮罩渲染（摄像头为前景，洞口透出视频） ---------- */
@@ -428,12 +504,21 @@ function renderMask() {
         mctx.closePath();
       };
 
-      // 1) 核心：完整填满四点构成的四边形（任意形状，不限于矩形）
+      // 1) 核心：把四点构成的四边形区域挖透（保证内部 100% 透明）
       mctx.filter = 'blur(2px)';
       tracePath(pts, 0);
       mctx.fillStyle = 'rgba(0,0,0,1)';
       mctx.fill();
       mctx.filter = 'none';
+
+      // 1.5) 把视频按四边形做透视贴合，让画面与四边形对齐
+      if (bgVideo.readyState >= 2) {
+        mctx.save();
+        tracePath(pts, 0);
+        mctx.clip();
+        drawVideoWarp(pts);
+        mctx.restore();
+      }
 
       // 2) 羽化：沿四边形轮廓向外做渐进擦除
       if (FEATHER > 0) {
@@ -554,8 +639,8 @@ function onHands(list) {
     return;
   }
 
-  // 双手都必须是「食指+拇指伸展」的框手，才认这四个点
-  if (list.length >= 2 && isFrameHand(list[0]) && isFrameHand(list[1])) {
+  // 只要检测到两只手，食指(8)与拇指(4)这四点就始终构成四边形
+  if (list.length >= 2) {
     const a = list[0], b = list[1];
     const g = computeRectGeo(a, b);
     rect = g;
@@ -591,11 +676,7 @@ function onHands(list) {
     else setState('RECT / 抠洞', '四指比框 — 透过四边形看视频', 'live');
     return;
   }
-  if (list.length >= 2) {
-    mode = 'point'; pointPos = null; targetReveal = 0;
-    setState('双手已识别 / 请伸食指拇指', '每只手都伸出食指与拇指，其余三指收拢', 'warn');
-    return;
-  }
+
 
   // 单手：回到光点
   mode = 'point';
