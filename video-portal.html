@@ -215,11 +215,20 @@ let pointPos = null;           // 单点（握指手）
 let otherTips = [];            // 另一只手五指指尖
 let lastSeen = 0, camOn = false, hasUserVideo = false;
 
+/* ---------- 画布 ---------- */
+const maskCanvas = $('#mask'), mctx = maskCanvas.getContext('2d');
+
 /* ---------- 元素尺寸 ---------- */
 function resizeSkel() {
   const r = skel.getBoundingClientRect();
   const W = Math.round(r.width * 2), H = Math.round(r.height * 2);
   if (skel.width !== W || skel.height !== H) { skel.width = W; skel.height = H; }
+  // 遮罩画布必须与视口一致，否则挖洞无效
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  const mw = Math.round(innerWidth * dpr), mh = Math.round(innerHeight * dpr);
+  if (maskCanvas.width !== mw || maskCanvas.height !== mh) {
+    maskCanvas.width = mw; maskCanvas.height = mh;
+  }
 }
 addEventListener('resize', resizeSkel);
 
@@ -343,7 +352,6 @@ function computeRectGeo(a, b) {
 }
 
 /* ---------- 遮罩渲染（摄像头为前景，洞口透出视频） ---------- */
-const maskCanvas = $('#mask'), mctx = maskCanvas.getContext('2d');
 function renderMask() {
   const W = maskCanvas.width, H = maskCanvas.height;
   mctx.globalCompositeOperation = 'source-over';
