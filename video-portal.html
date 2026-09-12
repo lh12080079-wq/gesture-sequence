@@ -349,8 +349,8 @@ function drawSkeleton(list, hasPoint) {
     }
   }
 
-  // 四边形框：完全由两手的食指(8)与拇指(4)这四点构成
-  if (mode === 'rect' && list[0] && list[1]) {
+  // 四边形框：只要两只手在画面里，这四点就始终连线
+  if (list[0] && list[1]) {
     const a = list[0], b = list[1];
     const p = projectRect(a, b);
     sctx.strokeStyle = CYAN + '.95)'; sctx.lineWidth = 3.4;
@@ -484,7 +484,7 @@ function renderMask() {
   // 洞口：把视频区域挖出来（destination-out 圆形 + 矩形）
   if (reveal > 0.001) {
     mctx.globalCompositeOperation = 'destination-out';
-    if (mode === 'rect' && smoothRect) {
+    if (smoothRect) {
       const r = smoothRect;
       const pts = r.pts || [];   // 四点：左手食指、右手食指、右手拇指、左手拇指
 
@@ -623,23 +623,7 @@ function onHands(list) {
   }
   lastSeen = now;
 
-  // 判定哪只手是"点"：五指靠拢
-  let pointIdx = -1;
-  for (let i = 0; i < list.length; i++) { if (isPinchedPoint(list[i])) { pointIdx = i; break; } }
-
-  if (pointIdx >= 0 && list.length >= 2) {
-    // 单点 + 另一只手五指连线
-    mode = 'point';
-    const oi = pointIdx === 0 ? 1 : 0;
-    const c = list[pointIdx][9];
-    pointPos = { x: (1 - c.x) * skel.width, y: c.y * skel.height };
-    otherTips = tipsOf(list[oi]).map(p => ({ x: (1 - p.x) * skel.width, y: p.y * skel.height }));
-    targetReveal = 0.85; targetFull = 0;
-    setState('POINT / ' + list.length + '手', '一只手握成点，另一只手五指连线', 'live');
-    return;
-  }
-
-  // 只要检测到两只手，食指(8)与拇指(4)这四点就始终构成四边形
+  // 【最高优先级】只要检测到两只手，四点就始终连线构成四边形
   if (list.length >= 2) {
     const a = list[0], b = list[1];
     const g = computeRectGeo(a, b);
@@ -674,6 +658,17 @@ function onHands(list) {
     }
 
     else setState('RECT / 抠洞', '四指比框 — 透过四边形看视频', 'live');
+    return;
+  }
+
+  // 单手：若五指并拢或握拳，视为一个点
+  if (list.length === 1 && isPinchedPoint(list[0])) {
+    mode = 'point';
+    const c = list[0][9];
+    pointPos = { x: (1 - c.x) * skel.width, y: c.y * skel.height };
+    otherTips = [];
+    targetReveal = 0.7; targetFull = 0;
+    setState('POINT / 单手', '一只手握成点 — 另一只手放进来可构成四边形', 'live');
     return;
   }
 
