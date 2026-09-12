@@ -133,6 +133,20 @@
     background:rgba(6,14,28,.66);border:1px solid rgba(255,92,200,.3);border-radius:10px;
     padding:9px 13px;backdrop-filter:blur(10px)}
   #bin .lbl{color:#39e6ff;font-size:9px;display:block;margin-bottom:4px}
+
+  /* ---------- 录制 ---------- */
+  #rec.on{background:linear-gradient(180deg,rgba(190,30,70,.9),rgba(90,10,35,.95));
+    border-color:rgba(255,90,140,.9);box-shadow:0 0 22px rgba(255,60,120,.6)}
+  #recDot{position:fixed;z-index:13;top:calc(14px + env(safe-area-inset-top));right:62px;
+    display:none;align-items:center;gap:7px;padding:7px 13px;border-radius:20px;
+    background:rgba(40,6,18,.85);border:1px solid rgba(255,90,140,.7);
+    color:#ffc2d8;font-size:11px;letter-spacing:.14em;font-family:Consolas,monospace;
+    box-shadow:0 0 18px rgba(255,60,120,.4)}
+  #recDot.on{display:flex}
+  #recDot span{width:9px;height:9px;border-radius:50%;background:#ff3d7f;
+    box-shadow:0 0 10px rgba(255,60,120,1);animation:blink 1s infinite}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+  #recDot b{color:#fff;font-weight:700}
   .panel{transition:opacity .26s ease, transform .26s ease}
   .panel.collapsed{opacity:0;transform:scale(.94);pointer-events:none;visibility:hidden}
   #err,#boot{position:fixed;z-index:20;left:50%;top:50%;transform:translate(-50%,-50%);max-width:78vw;
@@ -222,7 +236,9 @@
   <button id="start">启用摄像头</button>
   <button id="demoVideo">示例视频</button>
   <button id="exitFull" style="display:none">退出全屏</button>
+  <button id="rec">开始录制</button>
 </div>
+<div id="recDot"><span></span>REC <b id="recTime">00:00</b></div>
 <input id="file" type="file" accept="video/*" style="display:none">
 
 <div id="boot"></div>
@@ -1526,6 +1542,92 @@ function adjustPerformance(fps) {
   try { resizeSkel(); } catch (e) {}
 }
 
+
+/* ================= 网页内置录制 =================
+   把摄像头 + 特效合成到一张画布，用 MediaRecorder 录成 webm 直接下载
+   无需任何录屏软件 */
+let recorder = null, recChunks = [], recCanvas = null, recCtx = null, recTimer = null, recStart = 0;
+
+function initRecCanvas() {
+  if (recCanvas) return;
+  recCanvas = document.createElement('canvas');
+  recCtx = recCanvas.getContext('2d');
+}
+function startRecording() {
+  if (recorder) return;
+  initRecCanvas();
+  recCanvas.width = CANVAS_W || innerWidth;
+  recCanvas.height = CANVAS_H || innerHeight;
+
+  if (!window.MediaRecorder) {
+    showErr('当前浏览器不支持录制（MediaRecorder 不可用），请用 Chrome / Edge / Safari 新版');
+    return;
+  }
+  // 选择支持的编码格式
+  const types = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'];
+  const mime = types.find(t => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t));
+  if (!mime) { showErr('浏览器不支持可用的视频编码格式'); return; }
+
+  const stream = recCanvas.captureStream(30);
+  try {
+    recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 6000000 });
+  } catch (e) {
+    showErr('录制初始化失败：' + e.message);
+    return;
+  }
+  recChunks = [];
+  recorder.ondataavailable = (e) => { if (e.data && e.data.size) recChunks.push(e.data); };
+  recorder.onstop = () => {
+    const blob = new Blob(recChunks, { type: mime.split(';')[0] });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const d = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    a.download = 'gesture-' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) +
+      '-' + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds()) + '.webm';
+    a.href = url; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    $('#rec').textContent = '开始录制';
+    $('#rec').classList.remove('on');
+    $('#recDot').classList.remove('on');
+  };
+  recorder.start(1000);
+  recStart = performance.now();
+  $('#rec').textContent = '停止录制';
+  $('#rec').classList.add('on');
+  $('#recDot').classList.add('on');
+  // 计时
+  clearInterval(recTimer);
+  recTimer = setInterval(() => {
+    const s = Math.floor((performance.now() - recStart) / 1000);
+    const el = document.getElementById('recTime');
+    if (el) el.textContent = String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+  }, 500);
+}
+function stopRecording() {
+  if (!recorder) return;
+  clearInterval(recTimer);
+  recorder.stop();
+  recorder = null;
+}
+$('#rec').addEventListener('click', () => { recorder ? stopRecording() : startRecording(); });
+
+/* 每帧把最终画面合成到录制画布 */
+function captureFrame() {
+  if (!recorder || !recCanvas) return;
+  const W = recCanvas.width, H = recCanvas.height;
+  recCtx.setTransform(1, 0, 0, 1, 0, 0);
+  recCtx.fillStyle = '#04060c';
+  recCtx.fillRect(0, 0, W, H);
+  // 依次叠加：视频层 → 摄像头遮罩 → 滤镜层 → 骨架层 → 网格
+  const layers = [vlayer, maskCanvas, flayer, skel];
+  for (const cv of layers) {
+    if (cv && cv.width) {
+      try { recCtx.drawImage(cv, 0, 0, W, H); } catch (e) {}
+    }
+  }
+}
+
 /* ---------- 启动 ---------- */
 async function start() {
   const b = $('#start');
@@ -1712,6 +1814,7 @@ function loop() {
     }
   }
   drawHexGrid();
+  captureFrame();   // 录制合成
 
   // ---- 实时诊断面板 ----
   if (diagEl && diagTick++ % 12 === 0) {
