@@ -593,6 +593,14 @@ function tagNum(v, need) {
 const CLENCH_ON = 0.66, CLENCH_OFF = 0.45;
 const SPREAD_ON = 0.55, SPREAD_OFF = 0.35;
 let clenchLatched = false, spreadLatched = false;
+/* 分数的时间平滑：历史队列取平均，避免单帧波动 */
+const scoreHist = { clench: [[], []], spread: [[], []], curl: [[], []] };
+function smoothScore(kind, idx, v) {
+  const q = scoreHist[kind][idx] || (scoreHist[kind][idx] = []);
+  q.push(v); if (q.length > 6) q.shift();
+  let s = 0; for (const x of q) s += x;
+  return s / q.length;
+}
 
 /* ---- 模式稳定性：连续 N 帧一致才切换，避免抖动 ---- */
 let candMode = null, candCount = 0;
@@ -1045,6 +1053,59 @@ function glitch() {
   setTimeout(() => { glitchEl.style.opacity = '0'; }, 110);
 }
 
+
+/* ================= 关键点平滑滤波 =================
+   One Euro Filter：低速时强平滑（消除抖动），高速时弱平滑（保持跟手）
+   这是实时手势追踪的标准做法，比简单 lerp 效果好得多 */
+class OneEuro {
+  constructor(minCutoff = 1.2, beta = 0.008, dCutoff = 1.0) {
+    this.minCutoff = minCutoff; this.beta = beta; this.dCutoff = dCutoff;
+    this.xPrev = null; this.dxPrev = 0; this.tPrev = null;
+  }
+  alpha(cutoff, dt) {
+    const tau = 1 / (2 * Math.PI * cutoff);
+    return 1 / (1 + tau / dt);
+  }
+  filter(x, t) {
+    if (this.xPrev === null) { this.xPrev = x; this.tPrev = t; return x; }
+    let dt = (t - this.tPrev) / 1000;
+    if (!(dt > 0)) dt = 1 / 30;
+    dt = Math.min(dt, 0.1);
+    const dx = (x - this.xPrev) / dt;
+    const aD = this.alpha(this.dCutoff, dt);
+    const dxHat = aD * dx + (1 - aD) * this.dxPrev;
+    const cutoff = this.minCutoff + this.beta * Math.abs(dxHat);
+    const a = this.alpha(cutoff, dt);
+    const xHat = a * x + (1 - a) * this.xPrev;
+    this.xPrev = xHat; this.dxPrev = dxHat; this.tPrev = t;
+    return xHat;
+  }
+}
+
+/* 每只手的 21 个点 × (x,y,z) 各一个滤波器 */
+const filters = [];
+function getFilter(handIdx, lmIdx, axis) {
+  const k = handIdx * 21 * 3 + lmIdx * 3 + axis;
+  if (!filters[k]) filters[k] = new OneEuro(1.15, 0.006, 1.0);
+  return filters[k];
+}
+/* 对整帧关键点做滤波 */
+function smoothLandmarks(list, t) {
+  if (!list.length) { filters.length = 0; return list; }
+  const out = [];
+  for (let h = 0; h < list.length; h++) {
+    const src = list[h];
+    const dst = src.map((p, i) => ({
+      x: getFilter(h, i, 0).filter(p.x, t),
+      y: getFilter(h, i, 1).filter(p.y, t),
+      z: getFilter(h, i, 2).filter(p.z || 0, t)
+    }));
+    // 保留自定义属性
+    out.push(dst);
+  }
+  return out;
+}
+
 /* ---------- 手势主逻辑 ---------- */
 function onHands(list) {
   lastList = list;
@@ -1077,7 +1138,8 @@ function onHands(list) {
     // 对每只手算置信度，取最像攥拳的 / 最像张开的，且必须高于对方的握拳分
     let ci = -1, si = -1, bestCl = -1, bestSp = -1;
     for (let i = 0; i < list.length; i++) {
-      const c = clenchScore(list[i]), s = spreadScore(list[i]);
+      const c = smoothScore('clench', i, clenchScore(list[i]));
+      const s = smoothScore('spread', i, spreadScore(list[i]));
       list[i].__clench = c; list[i].__spread = s;
       // 同一只手不可能既攥紧又完全张开：要求分差明显
       // 攥拳手：攥拳分必须达标，且明显高于自身的张开分
@@ -1107,7 +1169,7 @@ function onHands(list) {
   }
 
   // 四边形模式：两手「其余六指全部收紧」即触发（食指拇指自然张开用于取框角）
-  const curls = list.map(lm => (lm.__curl = curlScore(lm)));
+  const curls = list.map((lm, i) => (lm.__curl = smoothScore('curl', i, curlScore(lm))));
   const opens = list.map(lm => (lm.__open3 = indexThumbClearlyOpen(lm) ? 1 : 0));
   const opensOk = list.map(lm => indexThumbClearlyOpen(lm));
   const bothCurled = list.length >= 2 &&
@@ -1261,8 +1323,10 @@ async function start() {
       const now = performance.now();
       if (now - prev < 26) return;
       prev = now;
-      let list = [];
-      try { list = landmarker.detectForVideo(cam, now).landmarks || []; } catch (e) { return; }
+      let raw = [];
+      try { raw = landmarker.detectForVideo(cam, now).landmarks || []; } catch (e) { return; }
+      // 关键点平滑，消除抖动
+      const list = smoothLandmarks(raw, now);
       onHands(list);
       drawSkeleton(list, mode === 'point');
       fps++;
