@@ -604,6 +604,7 @@ const SPREAD_ON = 0.40, SPREAD_OFF = 0.24;
 let clenchLatched = false, spreadLatched = false;
 let fanHoldFrames = 0;   // 扇形保持帧数，容忍短暂丢失
 let fanLastTri = [];     // 上次的三角形，保持期内沿用避免闪烁
+let fanAlpha = 0;        // 滤镜淡入淡出，避免瞬间消失
 /* 分数的时间平滑：历史队列取平均，避免单帧波动 */
 const scoreHist = { clench: [[], []], spread: [[], []], curl: [[], []] };
 function smoothScore(kind, idx, v) {
@@ -789,6 +790,9 @@ function renderFanFilters() {
   fctx.filter = 'none';
   fctx.clearRect(0, 0, W, H);
   if (!fanTriangles.length) return;
+  // 淡入淡出
+  const wantA = 1;
+  fanAlpha += (wantA - fanAlpha) * 0.2;
   if (fxCanvas.width !== W || fxCanvas.height !== H) { fxCanvas.width = W; fxCanvas.height = H; }
   const hasVideo = bgVideo.readyState >= 2 && bgVideo.videoWidth;
   const hasCam = camOn && cam.videoWidth;
@@ -817,6 +821,7 @@ function renderFanFilters() {
 
     // 2) 用三角形裁剪，把滤镜帧贴到独立滤镜层（在摄像头之上）
     fctx.save();
+    fctx.globalAlpha = fanAlpha;
     fctx.beginPath();
     fctx.moveTo(A.x, A.y); fctx.lineTo(B.x, B.y); fctx.lineTo(C.x, C.y);
     fctx.closePath();
@@ -1160,8 +1165,11 @@ function getFilter(handIdx, lmIdx, axis) {
   return filters[k];
 }
 /* 对整帧关键点做滤波 */
+let lastHandCount = 0;
 function smoothLandmarks(list, t) {
-  if (!list.length) { filters.length = 0; return list; }
+  if (!list.length) { filters.length = 0; lastHandCount = 0; return list; }
+  // 手数变化时重置滤波器，避免上一只手的残留污染新数据
+  if (list.length !== lastHandCount) { filters.length = 0; lastHandCount = list.length; }
   const out = [];
   for (let h = 0; h < list.length; h++) {
     const src = list[h];
@@ -1174,6 +1182,21 @@ function smoothLandmarks(list, t) {
     out.push(dst);
   }
   return out;
+}
+
+/* ---------- 稳定性：状态锁 + 丢帧计数 ---------- */
+/* 每种模式的最小保持时间（ms），防止快速切换造成闪烁 */
+const MIN_HOLD = { fan: 400, rect: 350, point: 250, idle: 120 };
+let modeSince = 0;          // 当前模式进入时间
+let missCount = 0;          // 连续未命中期望模式的帧数
+
+function canSwitch(next) {
+  const held = performance.now() - modeSince;
+  return mode === next || held >= (MIN_HOLD[mode] || 150);
+}
+function enterMode(next) {
+  if (mode !== next) { modeSince = performance.now(); }
+  mode = next;
 }
 
 /* ---------- 手势主逻辑 ---------- */
@@ -1190,8 +1213,10 @@ function onHands(list) {
 
   /* 没有手：清理残留状态（未全屏时） */
   if (!list.length) {
-    if (now - lastSeen > 300) {
-      mode = 'idle';
+    // 丢帧容忍：短暂丢手不清状态，避免画面闪断
+    missCount++;
+    if (missCount > 12 && now - lastSeen > 400) {
+      enterMode('idle');
       targetReveal = 0; reveal = 0;
       targetFull = 0; fullMix = 0;
       pointPos = null; liveQuad = null; smoothRect = null;
@@ -1200,6 +1225,7 @@ function onHands(list) {
     }
     return;
   }
+  missCount = 0;
   lastSeen = now;
 
   // 【最高优先级】扇形模式：一只手五指攥紧=一个点，另一只手五指张开
@@ -1237,12 +1263,12 @@ function onHands(list) {
       fanLastTri = fanTriangles;
       // 已处于扇形时：直接维持，不再要求重新确认（避免转动时断续）
       if (mode === 'fan') {
-        fanHoldFrames = 20;   // 保持若干帧，容忍瞬时丢失
+        fanHoldFrames = 20;
         setState('FAN / 4 三角形滤镜', '攥拳成点 · 另一手五指张开 → 4 个滤镜三角形', 'live');
         return;
       }
-      if (confirmMode('fan')) {
-        mode = 'fan';
+      if (confirmMode('fan') && canSwitch('fan')) {
+        enterMode('fan');
         fanHoldFrames = 20;
         pointPos = null; smoothRect = null; liveQuad = null;
         targetReveal = 0; targetFull = 0;
@@ -1267,7 +1293,7 @@ function onHands(list) {
   const bothCurled = list.length >= 2 &&
     curls.every(c => c >= CURL_ON) &&      // 六指收紧
     opensOk.every(v => v);                 // 且食指+拇指明显伸开
-  if (bothCurled && confirmMode('rect')) {
+  if (bothCurled && confirmMode('rect') && canSwitch('rect')) {
     const a = list[0], b = list[1];
     const g = computeRectGeo(a, b);
     rect = g;
@@ -1285,7 +1311,7 @@ function onHands(list) {
         smoothRect.pts[i].y += (g.pts[i].y - smoothRect.pts[i].y) * k;
       }
     }
-    mode = 'rect';
+    enterMode('rect');
     pointPos = null;
 
     // 洞占屏比例 → 决定 reveal 与全屏
@@ -1319,13 +1345,15 @@ function onHands(list) {
 
   // 检测到两只手但六指未收紧：立即退出四边形，不触发
   if (list.length >= 2) {
-    if (mode === 'rect') {
-      // 从四边形退出
+    if (mode === 'rect' && canSwitch('idle')) {
       liveQuad = null; smoothRect = null;
       reveal = 0; targetReveal = 0; fullMix = 0; targetFull = 0;
+      enterMode('idle');
       setState('已退出四边形', '手指松开 — 重新收紧六指可再次触发', '');
+      return;
     }
-    mode = 'idle';
+    if (mode === 'rect') return;   // 保持期未到，暂时维持
+    enterMode('idle');
     // 逐手显示达标情况，明确告诉用户缺哪只手
     const detail = list.map((lm, i) => {
       const c = (lm.__curl || 0), o = lm.__open3 ? 'Y' : 'N';
@@ -1558,7 +1586,10 @@ function loop() {
     drawVideoFull();
     // 滤镜必须在视频层绘制之后应用，否则会被覆盖
     if (mode === 'fan' && fanTriangles.length) renderFanFilters();
-    else if (flayer.width) fctx.clearRect(0, 0, flayer.width, flayer.height);
+    else if (flayer.width) {
+      fanAlpha += (0 - fanAlpha) * 0.25;
+      if (fanAlpha < 0.01) { fanAlpha = 0; fctx.clearRect(0, 0, flayer.width, flayer.height); }
+    }
     drawSkeleton(lastList, mode === 'point' && !liveQuad);
     if (mode === 'fan' && fanApex && fanTips.length === 5) {
       drawFanUI(fanApex, fanTips, performance.now());
