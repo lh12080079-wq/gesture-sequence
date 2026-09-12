@@ -332,14 +332,14 @@ function computeRectGeo(a, b) {
   const p = projectRect(a, b);
   const cx = (p[0].x + p[1].x + p[2].x + p[3].x) / 4;
   const cy = (p[0].y + p[1].y + p[2].y + p[3].y) / 4;
-  let w = 0, h = 0;
+  // 用鞋带公式算四边形真实面积（支持任意凸四边形）
+  let area2 = 0;
   for (let i = 0; i < 4; i++) {
     const q = p[(i + 1) % 4];
-    w = Math.max(w, Math.hypot(p[i].x - q.x, p[i].y - q.y));
+    area2 += p[i].x * q.y - q.x * p[i].y;
   }
-  const ang = Math.atan2(p[1].y - p[0].y, p[1].x - p[0].x);
-  h = Math.abs(Math.hypot(p[1].x - p[3].x, p[1].y - p[3].y));
-  return { x: p[0].x, y: p[0].y, w, h, cx, cy, ang, pts: p };
+  const area = Math.abs(area2) / 2;
+  return { cx, cy, area, pts: p };
 }
 
 /* ---------- 遮罩渲染（摄像头为前景，洞口透出视频） ---------- */
@@ -365,39 +365,45 @@ function renderMask() {
     mctx.globalCompositeOperation = 'destination-out';
     if (mode === 'rect' && smoothRect) {
       const r = smoothRect;
-      const pad = 10 * reveal;
-      mctx.save();
-      mctx.translate(r.cx, r.cy);
-      mctx.rotate(r.ang);
-      const rw = (r.w / 2 + pad), rh = (r.h / 2 + pad);
-      const rad = Math.min(rw, rh) * 0.35;
-      // 1) 先用极小的软边把矩形内部整体挖透（核心：保证内部 100% 透明）
+      const pts = r.pts || [];   // 四点：左手食指、右手食指、右手拇指、左手拇指
+
+      const tracePath = (list, grow) => {
+        // grow > 0 时按质心向外扩张，用于羽化外圈
+        mctx.beginPath();
+        for (let i = 0; i < list.length; i++) {
+          let px = list[i].x, py = list[i].y;
+          if (grow) {
+            const dx = px - r.cx, dy = py - r.cy;
+            const len = Math.hypot(dx, dy) || 1;
+            px += dx / len * grow;
+            py += dy / len * grow;
+          }
+          i ? mctx.lineTo(px, py) : mctx.moveTo(px, py);
+        }
+        mctx.closePath();
+      };
+
+      // 1) 核心：完整填满四点构成的四边形（任意形状，不限于矩形）
       mctx.filter = 'blur(2px)';
-      mctx.beginPath();
-      roundRect(mctx, -rw, -rh, rw * 2, rh * 2, rad);
+      tracePath(pts, 0);
       mctx.fillStyle = 'rgba(0,0,0,1)';
       mctx.fill();
       mctx.filter = 'none';
 
-      // 2) 羽化只作用在边缘一圈：向外扩张的环形渐进擦除
+      // 2) 羽化：沿四边形轮廓向外做渐进擦除
       if (FEATHER > 0) {
         const steps = 6;
         for (let i = steps; i >= 1; i--) {
-          const k = i / steps;                 // 1 → 0
-          const grow = FEATHER * (1 - k) + FEATHER * 0.5;
-          const fw = rw + grow * k + FEATHER * 0.5;
-          const fh = rh + grow * k + FEATHER * 0.5;
-          mctx.globalAlpha = 0.92;
-          mctx.filter = 'blur(' + Math.round(1 + FEATHER * 0.35) + 'px)';
-          mctx.beginPath();
-          roundRect(mctx, -fw, -fh, fw * 2, fh * 2, rad + grow * 0.4);
+          const grow = FEATHER * (i / steps);
+          mctx.globalAlpha = 0.9;
+          mctx.filter = 'blur(' + Math.round(1 + FEATHER * 0.3) + 'px)';
+          tracePath(pts, grow);
           mctx.fillStyle = 'rgba(0,0,0,1)';
           mctx.fill();
         }
         mctx.filter = 'none';
         mctx.globalAlpha = 1;
       }
-      mctx.restore();
     } else if (pointPos) {
       // 单点模式：柔和光晕洞
       const radius = 90 * reveal;
@@ -422,16 +428,6 @@ function renderMask() {
   }
 
 }
-function roundRect(c, x, y, w, h, r) {
-  r = Math.min(r, w / 2, h / 2);
-  c.moveTo(x + r, y);
-  c.arcTo(x + w, y, x + w, y + h, r);
-  c.arcTo(x + w, y + h, x, y + h, r);
-  c.arcTo(x, y + h, x, y, r);
-  c.arcTo(x, y, x + w, y, r);
-  c.closePath();
-}
-
 /* ---------- HUD ---------- */
 function setState(txt, hint, cls) {
   stateEl.textContent = txt;
@@ -518,21 +514,24 @@ function onHands(list) {
     const g = computeRectGeo(a, b);
     rect = g;
     // 平滑
-    if (!smoothRect) smoothRect = { x: g.x, y: g.y, w: g.w, h: g.h, cx: g.cx, cy: g.cy, ang: g.ang, pts: g.pts };
+    if (!smoothRect) smoothRect = { cx: g.cx, cy: g.cy, area: g.area, pts: g.pts.map(q => ({ x: q.x, y: q.y })) };
     else {
       const k = 0.35;
       smoothRect.cx += (g.cx - smoothRect.cx) * k;
       smoothRect.cy += (g.cy - smoothRect.cy) * k;
-      smoothRect.w += (g.w - smoothRect.w) * k;
-      smoothRect.h += (g.h - smoothRect.h) * k;
-      smoothRect.ang += (g.ang - smoothRect.ang) * k;
-      smoothRect.pts = g.pts;
+      smoothRect.area += (g.area - smoothRect.area) * k;
+      // 四个顶点逐点平滑，跟随任意四边形
+      if (!smoothRect.pts) smoothRect.pts = g.pts.map(q => ({ x: q.x, y: q.y }));
+      else for (let i = 0; i < 4; i++) {
+        smoothRect.pts[i].x += (g.pts[i].x - smoothRect.pts[i].x) * k;
+        smoothRect.pts[i].y += (g.pts[i].y - smoothRect.pts[i].y) * k;
+      }
     }
     mode = 'rect';
     pointPos = null;
 
     // 洞占屏比例 → 决定 reveal 与全屏
-    const area = (rect.w * rect.h) / (skel.width * skel.height);
+    const area = rect.area / (skel.width * skel.height);
     targetReveal = 1;   // 口子始终完全透出视频
     // 撑满屏幕面积的 80% 时进入全屏，并锁定（不再响应手势）
     if (area >= FULL_THRESHOLD && !isFull) {
