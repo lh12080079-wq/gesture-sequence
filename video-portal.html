@@ -162,7 +162,10 @@
 
 <div id="guide">
   <b>玩法</b><br>
-  <span class="p">只用四根手指</span>：每只手的食指+拇指<br>
+  <span class="p">扇形滤镜</span>：一手攥拳·一手张开五指<br>
+  <span class="k">点→五指辐射</span> → 夹出 4 个三角形<br>
+  <span class="k">每个三角形</span> 一种不同滤镜<br>
+  <span class="p">四指框</span>：两手食指+拇指构成四边形<br>
   <span class="k">其余三指收拢</span> → 才算有效框手<br>
   <span class="p">四点连线</span> → 构成任意四边形<br>
   <span class="k">四边形内</span> 实时透出视频画面<br>
@@ -516,6 +519,147 @@ function gyOf(p) { return (p[0].y + p[1].y + p[2].y + p[3].y) / 4; }
 const _binStream = ['1010100', '0110101', '1101001', '0011010', '1210100', '1410100'];
 function randBinCached(i) { return _binStream[i % _binStream.length]; }
 
+
+/* ================= 扇形四点三角形滤镜模式 ================= */
+/* 一只手五指攥紧 = 一个点（取指尖汇聚处）；另一只手五指张开 = 五个指尖点
+   点 → 五个指尖 辐射连线，相邻两线夹出一个三角形，共 4 个三角形
+   每个三角形内施加一种不同的滤镜 */
+
+/* 一只手是否"五指攥在一起"：五指指尖互相靠近且贴近掌心 */
+function isClenched(lm) {
+  const palm = lm[9], r = scaleOf(lm);
+  const tips = [4, 8, 12, 16, 20];
+  const near = tips.every(i => d2(lm[i], palm) < r * 1.25);
+  if (!near) return false;
+  // 五指尖彼此的离散程度也要小
+  let maxd = 0;
+  for (let i = 0; i < tips.length; i++)
+    for (let j = i + 1; j < tips.length; j++)
+      maxd = Math.max(maxd, d2(lm[tips[i]], lm[tips[j]]));
+  return maxd < r * 1.5;
+}
+/* 另一只手是否五指张开 */
+function isSpread(lm) {
+  const palm = lm[9], r = scaleOf(lm);
+  return [8, 12, 16, 20].filter(i => d2(lm[i], palm) > r * 1.75).length >= 4;
+}
+/* 攥拳手的汇聚点：五指尖的质心 */
+function clenchedPoint(lm) {
+  const tips = [4, 8, 12, 16, 20];
+  let x = 0, y = 0;
+  for (const i of tips) { x += lm[i].x; y += lm[i].y; }
+  return { x: x / 5, y: y / 5 };
+}
+
+/* 四种滤镜 */
+const FILTERS = [
+  { name: 'CYAN EDGE',    f: 'hue-rotate(160deg) saturate(2.2) contrast(1.35) brightness(1.1)' },
+  { name: 'NEON PINK',    f: 'hue-rotate(310deg) saturate(2.6) contrast(1.3) brightness(1.05)' },
+  { name: 'THERMAL',      f: 'invert(1) hue-rotate(180deg) saturate(3) contrast(1.5) brightness(1.15)' },
+  { name: 'GLITCH VIOLET',f: 'hue-rotate(255deg) saturate(2.8) contrast(1.6) brightness(.95)' }
+];
+
+let fanTriangles = [];   // 当前四个三角形的屏幕坐标
+let fanApex = null;
+let fanTips = [];
+
+function drawFanUI(apex, tips, t) {
+  if (!apex || !tips || tips.length < 5) return;
+  fanApex = apex; fanTips = tips;
+  fanTriangles = [];
+
+  sctx.save();
+
+  for (let i = 0; i < 4; i++) {
+    const A = tips[i], B = tips[i + 1];
+    fanTriangles.push([apex, A, B]);
+
+    // 三角形填充：半透明滤镜色
+    const col = ['rgba(57,230,255,', 'rgba(255,92,200,', 'rgba(255,180,60,', 'rgba(170,90,255,'][i];
+    sctx.beginPath();
+    sctx.moveTo(apex.x, apex.y);
+    sctx.lineTo(A.x, A.y);
+    sctx.lineTo(B.x, B.y);
+    sctx.closePath();
+    sctx.fillStyle = col + '0.10)';
+    sctx.fill();
+
+    // 三角形边框
+    sctx.strokeStyle = col + '0.85)';
+    sctx.lineWidth = 2.4;
+    sctx.shadowColor = col + '1)';
+    sctx.shadowBlur = 16;
+    sctx.stroke();
+    sctx.shadowBlur = 0;
+
+    // 三角形内的滤镜名标注
+    const cx = (apex.x + A.x + B.x) / 3;
+    const cy = (apex.y + A.y + B.y) / 3;
+    sctx.font = '700 13px Consolas, monospace';
+    sctx.textAlign = 'center';
+    sctx.textBaseline = 'middle';
+    sctx.fillStyle = col + '0.98)';
+    sctx.fillText(FILTERS[i].name, cx, cy);
+  }
+
+  // 辐射线：点 → 五个指尖
+  sctx.strokeStyle = 'rgba(57,230,255,.55)';
+  sctx.lineWidth = 1.6;
+  sctx.setLineDash([6, 6]);
+  for (const q of tips) {
+    sctx.beginPath(); sctx.moveTo(apex.x, apex.y); sctx.lineTo(q.x, q.y); sctx.stroke();
+  }
+  sctx.setLineDash([]);
+
+  // 汇聚点：高亮大圆
+  sctx.shadowColor = 'rgba(255,92,200,1)'; sctx.shadowBlur = 32;
+  sctx.fillStyle = 'rgba(255,92,200,.98)';
+  sctx.beginPath(); sctx.arc(apex.x, apex.y, 12, 0, Math.PI * 2); sctx.fill();
+  sctx.strokeStyle = 'rgba(180,245,255,.95)'; sctx.lineWidth = 2.6;
+  sctx.beginPath(); sctx.arc(apex.x, apex.y, 21, 0, Math.PI * 2); sctx.stroke();
+  sctx.shadowBlur = 0;
+
+  // 五个指尖节点
+  for (let i = 0; i < tips.length; i++) {
+    const q = tips[i];
+    sctx.fillStyle = 'rgba(255,92,200,.95)';
+    sctx.shadowColor = 'rgba(255,92,200,1)'; sctx.shadowBlur = 20;
+    sctx.beginPath(); sctx.arc(q.x, q.y, 6, 0, Math.PI * 2); sctx.fill();
+    sctx.shadowBlur = 0;
+    sctx.strokeStyle = 'rgba(57,230,255,.9)'; sctx.lineWidth = 2;
+    sctx.beginPath(); sctx.arc(q.x, q.y, 11, 0, Math.PI * 2); sctx.stroke();
+  }
+
+  // 二进制数字反馈
+  sctx.font = '700 14px Consolas, monospace';
+  for (let i = 0; i < tips.length; i++) {
+    const q = tips[i];
+    const nx = q.x - apex.x, ny = q.y - apex.y;
+    const nl = Math.hypot(nx, ny) || 1;
+    const px = q.x + nx / nl * 30, py = q.y + ny / nl * 30;
+    sctx.fillStyle = 'rgba(180,245,255,.95)';
+    sctx.fillText(_binStream[i % _binStream.length], px, py);
+  }
+  sctx.restore();
+}
+
+/* 在遮罩层为三角形区域施加滤镜（先挖洞透出视频，再叠滤镜色） */
+function renderFanFilters() {
+  if (!fanTriangles.length) return;
+  const W = maskCanvas.width, H = maskCanvas.height;
+  mctx.save();
+  for (let i = 0; i < fanTriangles.length; i++) {
+    const [A, B, C] = fanTriangles[i];
+    mctx.beginPath();
+    mctx.moveTo(A.x, A.y); mctx.lineTo(B.x, B.y); mctx.lineTo(C.x, C.y);
+    mctx.closePath();
+    const col = ['rgba(57,230,255,', 'rgba(255,92,200,', 'rgba(255,180,60,', 'rgba(170,90,255,'][i];
+    mctx.fillStyle = col + '0.20)';
+    mctx.fill();
+  }
+  mctx.restore();
+}
+
 /* ---------- 用两手的食指与拇指构造矩形 ---------- */
 function projectRect(a, b) {
   // 左手食指→右手食指 与 左手拇指→右手拇指 形成四边形
@@ -721,6 +865,9 @@ function renderMask() {
   }
 
   // 全屏接管：整体淡出摄像头层
+  // 扇形模式：在三角形区域叠加滤镜色调
+  if (mode === 'fan' && fanTriangles.length) renderFanFilters();
+
   // 全屏：摄像头层整体淡出，视频层完全显露
   if (fullMix > 0.001) {
     mctx.globalCompositeOperation = 'destination-out';
@@ -797,7 +944,33 @@ function onHands(list) {
   }
   lastSeen = now;
 
-  // 【最高优先级】只要检测到两只手，四点就始终连线构成四边形
+  // 【最高优先级】扇形模式：一只手五指攥紧=一个点，另一只手五指张开
+  // 点与五个指尖辐射连线，相邻两线夹出 4 个三角形，各施加一种滤镜
+  if (list.length >= 2) {
+    let ci = -1, si = -1;
+    for (let i = 0; i < list.length; i++) {
+      if (ci < 0 && isClenched(list[i])) ci = i;
+      else if (si < 0 && isSpread(list[i])) si = i;
+    }
+    if (ci >= 0 && si >= 0) {
+      const cp = clenchedPoint(list[ci]);
+      const apex = { x: (1 - cp.x) * CANVAS_W, y: cp.y * CANVAS_H };
+      // 五指按拇指→小指顺序取指尖
+      const tips = [4, 8, 12, 16, 20].map(k => {
+        const p = list[si][k];
+        return { x: (1 - p.x) * CANVAS_W, y: p.y * CANVAS_H };
+      });
+      mode = 'fan';
+      fanApex = apex; fanTips = tips;
+      pointPos = null; smoothRect = null; liveQuad = null;
+      targetReveal = 0; targetFull = 0;
+      setState('FAN / 4 三角形滤镜', '攥拳成点 · 另一手五指张开 → 4 个滤镜三角形', 'live');
+      return;
+    }
+    mode = 'rect';
+  }
+
+  // 四点四边形模式
   if (list.length >= 2) {
     const a = list[0], b = list[1];
     const g = computeRectGeo(a, b);
@@ -1033,9 +1206,13 @@ function loop() {
   if (isFull) {
     if (skel.width) sctx.clearRect(0, 0, skel.width, skel.height);
   } else {
-    drawSkeleton(lastList, mode === 'point');
-    // 二进制数字交互反馈：跟随四点移动
-    if (liveQuad && liveQuad.length === 4) drawBinaryUI(liveQuad, performance.now());
+    if (mode === 'fan' && fanApex && fanTips.length === 5) {
+      drawFanUI(fanApex, fanTips, performance.now());
+    } else {
+      drawSkeleton(lastList, mode === 'point');
+      // 二进制数字交互反馈：跟随四点移动
+      if (liveQuad && liveQuad.length === 4) drawBinaryUI(liveQuad, performance.now());
+    }
   }
   drawHexGrid();
 
