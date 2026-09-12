@@ -286,6 +286,9 @@ let diagTick = 0;
 let diagEl = null;
 let FULL_THRESHOLD = 0.65;          // 可调 60%~70%：四边形占屏比例阈值（全屏触发）
 let isFull = false;                 // 是否已进入全屏（带滞回）
+let fullAnim = 0;                   // 0→1 全屏撑满动画进度
+let fullAnimFrom = null;            // 动画起始的四边形顶点
+let fullAnimTarget = null;          // 目标（全屏矩形）
 let rect = { x: 0, y: 0, w: 0, h: 0, cx: 0, cy: 0, ang: 0 };
 let smoothRect = null;
 let pointPos = null;           // 单点（握指手）
@@ -1034,6 +1037,21 @@ function drawVideoWarp_UNUSED(q) {
 }
 
 /* ---------- 遮罩渲染（摄像头为前景，洞口透出视频） ---------- */
+/* 缓动函数：easeInOutCubic，起步和收尾都平滑 */
+function easeInOut(t) {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+/* 计算当前动画帧的洞口形状 */
+function currentHoleQuad() {
+  if (!fullAnimFrom || !fullAnimTarget) return liveQuad;
+  if (fullAnim >= 1) return fullAnimTarget;
+  const k = easeInOut(fullAnim);
+  return fullAnimFrom.map((p, i) => ({
+    x: p.x + (fullAnimTarget[i].x - p.x) * k,
+    y: p.y + (fullAnimTarget[i].y - p.y) * k
+  }));
+}
+
 function renderMask() {
   const W = maskCanvas.width, H = maskCanvas.height;
   mctx.globalCompositeOperation = 'source-over';
@@ -1055,7 +1073,8 @@ function renderMask() {
     mctx.globalCompositeOperation = 'destination-out';
     if (smoothRect) {
       const r = smoothRect;
-      const pts = r.pts || [];   // 四点：左手食指、右手食指、右手拇指、左手拇指
+      // 全屏动画期间使用插值形状（撑满过程）
+      const pts = isFull ? (currentHoleQuad() || r.pts || []) : (r.pts || []);
 
       const tracePath = (list, grow) => {
         // grow > 0 时按质心向外扩张，用于羽化外圈
@@ -1400,6 +1419,13 @@ function onHands(list) {
         isFull = true;
         targetFull = 1;
         glitch();
+        // 启动撑满动画：从当前四边形平滑扩张到全屏
+        fullAnim = 0;
+        fullAnimFrom = liveQuad ? liveQuad.map(p => ({ x: p.x, y: p.y })) : null;
+        fullAnimTarget = [
+          { x: 0, y: 0 }, { x: CANVAS_W, y: 0 },
+          { x: CANVAS_W, y: CANVAS_H }, { x: 0, y: CANVAS_H }
+        ];
         startPlayback();
         setState('FULL / 全屏播放', '已进入全屏 — 不会因手势变化退出', 'full');
       } else {
@@ -1758,6 +1784,7 @@ $('#start').addEventListener('click', start);
 /* ---------- 退出全屏 ---------- */
 function exitFull() {
   isFull = false;
+  fullAnim = 0; fullAnimFrom = null; fullAnimTarget = null;
   targetFull = 0; fullMix = 0;
   targetReveal = 0; reveal = 0;
   smoothRect = null; mode = 'idle';
@@ -1788,6 +1815,11 @@ function loop() {
   const lerp = (a, b, k) => a + (b - a) * k;
   reveal = lerp(reveal, targetReveal, 0.18);
   fullMix = lerp(fullMix, targetFull, 0.08);
+
+  /* 撑满动画：从四边形平滑扩张到全屏（缓动曲线，丝滑不突兀） */
+  if (isFull && fullAnim < 1) {
+    fullAnim = Math.min(1, fullAnim + 0.035);   // 约 0.5 秒完成
+  }
   $('#fullbar').style.opacity = fullMix > 0.05 ? 1 : 0;
   $('#fullbar').querySelector('.fill2').style.width = Math.round(fullMix * 100) + '%';
   $('#fullbar').querySelector('.lbl').textContent = isFull
@@ -1795,12 +1827,27 @@ function loop() {
     : 'FULLSCREEN PROGRESS (' + Math.round(FULL_THRESHOLD * 100) + '%)';
   const exBtn = $('#exitFull');
   if (exBtn) exBtn.style.display = isFull ? 'inline-block' : 'none';
-  if (isFull) {
-    // 全屏：清空摄像头遮罩层与骨架层，只保留视频
+  if (isFull && fullAnim >= 1) {
+    // 动画完成后：清空交互层，只保留视频
     if (maskCanvas.width) mctx.setTransform(1, 0, 0, 1, 0, 0), mctx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
     if (skel.width) sctx.clearRect(0, 0, skel.width, skel.height);
     if (flayer.width) fctx.clearRect(0, 0, flayer.width, flayer.height);
     drawVideoFull();
+  } else if (isFull) {
+    // 动画进行中：继续渲染挖洞（洞口正在撑满），同时淡出摄像头
+    renderMask();
+    drawVideoFull();
+    if (maskCanvas.width) {
+      mctx.setTransform(1, 0, 0, 1, 0, 0);
+      mctx.globalCompositeOperation = 'destination-out';
+      mctx.globalAlpha = easeInOut(fullAnim);
+      mctx.fillStyle = '#000';
+      mctx.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
+      mctx.globalAlpha = 1;
+      mctx.globalCompositeOperation = 'source-over';
+    }
+    if (skel.width) sctx.clearRect(0, 0, skel.width, skel.height);
+    if (flayer.width) fctx.clearRect(0, 0, flayer.width, flayer.height);
   } else {
     renderMask();
     drawVideoFull();
