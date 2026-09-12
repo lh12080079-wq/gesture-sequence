@@ -596,20 +596,30 @@ function confirmMode(next) {
 }
 /* 四边形模式专用：一只手的"其余三指"必须收紧
    食指(8)与拇指(4)用来构成框角，中指(12)/无名指(16)/小指(20)必须收拢 */
+/* 严格收拢判定：三指必须"真的弯下去"，光靠近不够 */
 function curlScore(lm) {
   const palm = lm[9], r = scaleOf(lm);
-  const OTHERS = [12, 16, 20];
-  // 收拢 = 指尖靠近掌心。归一化比值 1.0 已算收拢，2.0 为完全张开
-  const scores = OTHERS.map(i => {
-    const ratio = d2(lm[i], palm) / r;
-    return clamp01((1.85 - ratio) / 0.75);
+  const FINGERS = [[12, 10], [16, 14], [20, 18]];   // [指尖, 第二指节]
+  const scores = FINGERS.map(([tip, pip]) => {
+    const dTip = d2(lm[tip], palm) / r;
+    const dPip = d2(lm[pip], palm) / r;
+    // ① 指尖要足够靠近掌心（收紧了）
+    const near = clamp01((1.55 - dTip) / 0.55);
+    // ② 指尖必须比第二指节更靠近掌心（说明真的弯曲，而非整根手指伸着）
+    const bent = clamp01((dPip - dTip) / (dPip * 0.42 + 1e-6));
+    return near * 0.55 + bent * 0.45;
   });
-  // 三指都要收拢：用最小值作为主导，略加平均，确保"全都收紧"
+  // 用最小值主导：任何一指没收紧都会明显拉低
   scores.sort((a, b) => a - b);
   const worst = scores[0], avg = (scores[0] + scores[1] + scores[2]) / 3;
-  return clamp01(worst * 0.6 + avg * 0.4);
+  return clamp01(worst * 0.65 + avg * 0.35);
 }
-const CURL_ON = 0.62, CURL_OFF = 0.42;
+/* 食指与拇指必须"明显伸开"才允许四边形 */
+function indexThumbClearlyOpen(lm) {
+  const palm = lm[9], r = scaleOf(lm);
+  return d2(lm[8], palm) / r > 1.55 && d2(lm[4], palm) / r > 1.25;
+}
+const CURL_ON = 0.70, CURL_OFF = 0.50;
 function isOthersCurled(lm) {
   const s = curlScore(lm);
   lm.__curl = s;
@@ -1026,16 +1036,23 @@ function glitch() {
 function onHands(list) {
   lastList = list;
   const now = performance.now();
-  if (isFull) { handsEl.textContent = 'HANDS: 全屏已锁定'; return; }
   handsEl.textContent = 'HANDS: ' + list.length;
+
+  /* 没有手：无论是否全屏，都要清理状态（避免残留冻结） */
   if (!list.length) {
-    if (isFull) { handsEl.textContent = 'HANDS: 0 / 全屏已锁定'; return; }
-    if (now - lastSeen > 350) {
-      mode = 'idle'; targetReveal = 0; pointPos = null; liveQuad = null;
+    if (now - lastSeen > 300) {
+      if (isFull) { exitFull(); }
+      mode = 'idle';
+      targetReveal = 0; reveal = 0;
+      targetFull = 0; fullMix = 0;
+      pointPos = null; liveQuad = null; smoothRect = null;
+      fanApex = null; fanTips = []; fanTriangles = [];
       setState('IDLE', '把手放进画面', '');
     }
     return;
   }
+  /* 已全屏：仅在有手时保持锁定，手离开则上面的分支会退出全屏 */
+  if (isFull) { handsEl.textContent = 'HANDS: ' + list.length + ' / 全屏'; return; }
   lastSeen = now;
 
   // 【最高优先级】扇形模式：一只手五指攥紧=一个点，另一只手五指张开
@@ -1075,8 +1092,11 @@ function onHands(list) {
 
   // 四边形模式：两手「其余六指全部收紧」即触发（食指拇指自然张开用于取框角）
   const curls = list.map(lm => (lm.__curl = curlScore(lm)));
-  const opens = list.map(lm => (lm.__open2 = indexThumbOpen(lm) ? 1 : 0));
-  const bothCurled = list.length >= 2 && curls.every(c => c >= CURL_ON);
+  const opens = list.map(lm => (lm.__open3 = indexThumbClearlyOpen(lm) ? 1 : 0));
+  const opensOk = list.map(lm => indexThumbClearlyOpen(lm));
+  const bothCurled = list.length >= 2 &&
+    curls.every(c => c >= CURL_ON) &&      // 六指收紧
+    opensOk.every(v => v);                 // 且食指+拇指明显伸开
   if (bothCurled && confirmMode('rect')) {
     const a = list[0], b = list[1];
     const g = computeRectGeo(a, b);
@@ -1293,7 +1313,7 @@ function exitFull() {
   glitch();
   setState('READY / 已退出全屏', '可重新比出矩形抠洞', 'ok');
 }
-$('#exitFull').addEventListener('click', exitFull);
+$('#exitFull').addEventListener('click', exitFull);   // 见下方函数声明
 
 /* ---------- 可调参数 ---------- */
 let FEATHER = 8;
@@ -1356,7 +1376,12 @@ function loop() {
       '握拳 ' + lastList.map(l => tagNum(l.__clench, CLENCH_ON)).join(' ') +
       ' 张开 ' + lastList.map(l => tagNum(l.__spread, SPREAD_ON)).join(' ') +
       ' 收拢 ' + lastList.map(l => tagNum(l.__curl, CURL_ON)).join(' ') +
-      ' 开指 ' + lastList.map(l => (l.__open2 || 0) + '/2').join(' ') + '\n' +
+      ' 开指 ' + lastList.map(l => (l.__open3 ? 'Y' : 'N')).join(' ') +
+      ' 伸开 ' + lastList.map(l => {
+        if (!l[8]) return '-';
+        const rr = scaleOf(l);
+        return (d2(l[8], l[9]) / rr).toFixed(2) + '/' + (d2(l[4], l[9]) / rr).toFixed(2);
+      }).join(' ') + '\n' +
       '↑ 绿=达标(握≥' + CLENCH_ON + ' 张≥' + SPREAD_ON + ' 收拢≥' + CURL_ON + ')\n' +
       '四点 ' + q + '\n' +
       '占屏 <span class="' + (lastArea >= FULL_THRESHOLD ? 'ok2' : 'warn2') + '">' + R(lastArea * 100, 1) + '%</span>' +
