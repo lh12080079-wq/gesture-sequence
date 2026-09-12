@@ -567,6 +567,16 @@ function tagNum(v, need) {
 const CLENCH_ON = 0.55, CLENCH_OFF = 0.38;
 const SPREAD_ON = 0.55, SPREAD_OFF = 0.35;
 let clenchLatched = false, spreadLatched = false;
+
+/* ---- 模式稳定性：连续 N 帧一致才切换，避免抖动 ---- */
+let candMode = null, candCount = 0;
+const MODE_CONFIRM = 4;        // 需连续 4 帧（约 120ms）确认
+function confirmMode(next) {
+  if (next === mode) { candMode = null; candCount = 0; return true; }
+  if (next === candMode) { candCount++; }
+  else { candMode = next; candCount = 1; }
+  return candCount >= MODE_CONFIRM;
+}
 /* 四边形模式专用：一只手的"其余三指"必须收紧
    食指(8)与拇指(4)用来构成框角，中指(12)/无名指(16)/小指(20)必须收拢 */
 function curlScore(lm) {
@@ -1017,8 +1027,10 @@ function onHands(list) {
       const c = clenchScore(list[i]), s = spreadScore(list[i]);
       list[i].__clench = c; list[i].__spread = s;
       // 同一只手不可能既攥紧又完全张开：要求分差明显
-      if (c >= CLENCH_ON && c > s + 0.15 && c > bestCl) { bestCl = c; ci = i; }
-      if (s >= SPREAD_ON && s > c + 0.15 && s > bestSp) { bestSp = s; si = i; }
+      // 攥拳手：分数达标即可
+      if (c >= CLENCH_ON && c > bestCl && i !== si) { bestCl = c; ci = i; }
+      // 张开手：只要比攥拳分高、且不是攥拳那只手即可（不再要求张开分很高）
+      if (i !== ci && s >= c && c < CLENCH_ON && s > bestSp) { bestSp = s; si = i; }
     }
     // 强制互斥：两只手必须是同一只
     if (ci === si) { ci = -1; si = -1; }
@@ -1030,20 +1042,20 @@ function onHands(list) {
         const p = list[si][k];
         return { x: (1 - p.x) * CANVAS_W, y: p.y * CANVAS_H };
       });
-      mode = 'fan';
       fanApex = apex; fanTips = tips;
-      pointPos = null; smoothRect = null; liveQuad = null;
-      targetReveal = 0; targetFull = 0;
-      setState('FAN / 4 三角形滤镜', '攥拳成点 · 另一手五指张开 → 4 个滤镜三角形', 'live');
+      if (confirmMode('fan')) {
+        mode = 'fan';
+        pointPos = null; smoothRect = null; liveQuad = null;
+        targetReveal = 0; targetFull = 0;
+        setState('FAN / 4 三角形滤镜', '攥拳成点 · 另一手五指张开 → 4 个滤镜三角形', 'live');
+      }
       return;
     }
     mode = 'rect';
   }
 
-  // 四边形模式：必须两手都「其余三指收紧 + 食指拇指张开」才识别
-  const bothFraming = list.length >= 2 &&
-    list.every(lm => isOthersCurled(lm) && indexThumbOpen(lm));
-  if (bothFraming) {
+  // 四边形模式：只要检测到两只手就成立（四点=两手食指+拇指）
+  if (list.length >= 2) {
     const a = list[0], b = list[1];
     const g = computeRectGeo(a, b);
     rect = g;
@@ -1061,6 +1073,7 @@ function onHands(list) {
         smoothRect.pts[i].y += (g.pts[i].y - smoothRect.pts[i].y) * k;
       }
     }
+    confirmMode('rect');
     mode = 'rect';
     pointPos = null;
 
@@ -1081,15 +1094,6 @@ function onHands(list) {
         setState('RECT / 抠洞 ' + Math.round(area * 100) + '%', '四指比框 — 透过四边形看视频', 'live');
       }
     }
-    return;
-  }
-
-  // 检测到两只手但姿态不符：明确提示
-  if (list.length >= 2 && !bothFraming) {
-    mode = 'idle'; liveQuad = null; smoothRect = null;
-    targetReveal = 0; targetFull = 0;
-    const curls = list.map(lm => (lm.__curl || 0).toFixed(2)).join(' / ');
-    setState('请收紧其余六指', '两手都：中指/无名指/小指收拢，只伸食指+拇指（收拢分 ' + curls + '，需≥' + CURL_ON + '）', 'warn');
     return;
   }
 
