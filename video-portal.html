@@ -389,6 +389,132 @@ function drawSkeleton(list, hasPoint) {
   }
 }
 
+
+/* ---------- 二进制数字交互反馈 ---------- */
+/* 生成如 1210100 / 1410100 的数字串 */
+const BIN_SEEDS = ['1210100', '1410100', '1010100', '0110100', '1101001', '0011010'];
+let binPhase = 0;
+let binCache = [];   // 跟随四点移动的数字标签
+
+function randBin(len) {
+  let s = '';
+  for (let i = 0; i < len; i++) s += Math.random() < 0.5 ? '0' : '1';
+  return s;
+}
+/* 初始化/刷新环绕标签：每个顶点挂若干条数字 */
+function refreshBinTags() {
+  binCache = [];
+  for (let v = 0; v < 4; v++) {
+    const n = 3;
+    for (let i = 0; i < n; i++) {
+      binCache.push({
+        v, // 归属顶点
+        seed: BIN_SEEDS[(v * n + i) % BIN_SEEDS.length],
+        t: Math.random(),          // 沿两条边的插值位置
+        edge: i % 2,               // 0: 沿 v→v+1 边, 1: 沿 v→v+3 边
+        off: 18 + i * 16,          // 法向外偏移
+        text: randBin(7),
+        spin: Math.random() * 6.28,
+        life: 1
+      });
+    }
+  }
+  binPhase = 0;
+}
+refreshBinTags();
+
+function drawBinaryUI(p, t) {
+  if (!p || p.length !== 4) return;
+  binPhase += 0.016;
+
+  // 每 0.45 秒刷新一次数字内容（跳动感）
+  if (Math.floor(binPhase / 0.45) !== Math.floor((binPhase - 0.016) / 0.45)) {
+    for (const c of binCache) c.text = randBin(7);
+  }
+
+  sctx.save();
+  sctx.font = '700 15px Consolas, monospace';
+  sctx.textBaseline = 'middle';
+  sctx.textAlign = 'center';
+
+  for (const c of binCache) {
+    const A = p[c.v], B = p[(c.v + (c.edge ? 3 : 1)) % 4];
+    // 沿边插值
+    const mx = A.x + (B.x - A.x) * c.t;
+    const my = A.y + (B.y - A.y) * c.t;
+    // 计算外向法线（相对四边形质心）
+    const gx = (p[0].x + p[1].x + p[2].x + p[3].x) / 4;
+    const gy = (p[0].y + p[1].y + p[2].y + p[3].y) / 4;
+    let nx = mx - gx, ny = my - gy;
+    const nl = Math.hypot(nx, ny) || 1;
+    nx /= nl; ny /= nl;
+    const bob = Math.sin(binPhase * 2.2 + c.spin) * 4;
+    const px = mx + nx * (c.off + bob);
+    const py = my + ny * (c.off + bob);
+
+    // 引线
+    sctx.strokeStyle = 'rgba(57,230,255,.4)';
+    sctx.lineWidth = 1.2;
+    sctx.beginPath(); sctx.moveTo(mx, my); sctx.lineTo(px, py); sctx.stroke();
+
+    // 数字标签（交替青/粉）
+    const isCyan = (c.v % 2) === 0;
+    sctx.shadowColor = isCyan ? 'rgba(57,230,255,1)' : 'rgba(255,92,200,1)';
+    sctx.shadowBlur = 14;
+    sctx.fillStyle = isCyan ? 'rgba(180,245,255,.98)' : 'rgba(255,190,235,.98)';
+    sctx.fillText(c.text, px, py);
+    sctx.shadowBlur = 0;
+  }
+
+  // 四个顶点处的主标注：1210100 / 1410100 这类
+  for (let v = 0; v < 4; v++) {
+    const q = p[v];
+    const gx = (p[0].x + p[1].x + p[2].x + p[3].x) / 4;
+    const gy = (p[0].y + p[1].y + p[2].y + p[3].y) / 4;
+    let nx = q.x - gx, ny = q.y - gy;
+    const nl = Math.hypot(nx, ny) || 1;
+    nx /= nl; ny /= nl;
+    const dist = 42 + Math.sin(binPhase * 1.8 + v * 1.6) * 5;
+    const px = q.x + nx * dist;
+    const py = q.y + ny * dist;
+
+    const label = BIN_SEEDS[v % BIN_SEEDS.length];
+    sctx.font = '700 19px Consolas, monospace';
+    sctx.shadowColor = 'rgba(255,92,200,1)';
+    sctx.shadowBlur = 20;
+    sctx.fillStyle = 'rgba(255,225,245,.98)';
+    sctx.fillText(label, px, py);
+    sctx.shadowBlur = 0;
+
+    // 顶点到标签的引线
+    sctx.strokeStyle = 'rgba(255,92,200,.5)';
+    sctx.lineWidth = 1.4;
+    sctx.beginPath(); sctx.moveTo(q.x, q.y); sctx.lineTo(px, py); sctx.stroke();
+
+    // 顶点小方块（数字节点感）
+    sctx.strokeStyle = 'rgba(57,230,255,.9)';
+    sctx.lineWidth = 2;
+    sctx.strokeRect(q.x - 7, q.y - 7, 14, 14);
+    sctx.font = '700 15px Consolas, monospace';
+  }
+
+  // 中心漂浮的二进制流
+  sctx.font = '600 13px Consolas, monospace';
+  for (let i = 0; i < 6; i++) {
+    const a = binPhase * 0.5 + i * 1.05;
+    const rr = 60 + i * 26;
+    const cx = gxOf(p) + Math.cos(a) * rr;
+    const cy = gyOf(p) + Math.sin(a) * rr * 0.62;
+    sctx.fillStyle = 'rgba(120,220,255,' + (0.35 + 0.3 * Math.sin(binPhase * 3 + i)) + ')';
+    sctx.fillText(randBinCached(i), cx, cy);
+  }
+  sctx.restore();
+}
+function gxOf(p) { return (p[0].x + p[1].x + p[2].x + p[3].x) / 4; }
+function gyOf(p) { return (p[0].y + p[1].y + p[2].y + p[3].y) / 4; }
+const _binStream = ['1010100', '0110101', '1101001', '0011010', '1210100', '1410100'];
+function randBinCached(i) { return _binStream[i % _binStream.length]; }
+
 /* ---------- 用两手的食指与拇指构造矩形 ---------- */
 function projectRect(a, b) {
   // 左手食指→右手食指 与 左手拇指→右手拇指 形成四边形
@@ -880,6 +1006,8 @@ function loop() {
     if (skel.width) sctx.clearRect(0, 0, skel.width, skel.height);
   } else {
     drawSkeleton(lastList, mode === 'point');
+    // 二进制数字交互反馈：跟随四点移动
+    if (liveQuad && liveQuad.length === 4) drawBinaryUI(liveQuad, performance.now());
   }
   drawHexGrid();
 
