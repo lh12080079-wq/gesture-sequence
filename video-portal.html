@@ -151,13 +151,13 @@
 
 <div id="guide">
   <b>玩法</b><br>
+  <span class="p">只用四根手指</span>：每只手的食指+拇指<br>
+  <span class="k">其余三指收拢</span> → 才算有效框手<br>
+  <span class="p">四点连线</span> → 构成任意四边形<br>
+  <span class="k">四边形内</span> 实时透出视频画面<br>
+  <span class="k">四边形外</span> 摄像头画面<br>
+  <span class="k">撑满阈值</span> → 全屏接管并锁定<br>
   <span class="k">一只手</span> 握拳 / 五指并拢 → 视作一个点<br>
-  <span class="k">另一只手</span> 五指 → 与点连线<br>
-  <span class="p">双手食指+拇指</span> → 构成矩形<br>
-  <span class="p">矩形</span> → 像漏洞一样看到后台视频<br>
-  <span class="p">矩形</span> 内实时透出视频画面<br>
-  <span class="k">撑满阈值</span> → 全屏接管并锁定，不再退回<br>
-  <span class="k">矩形内</span> 视频 · <span class="k">矩形外</span> 摄像头<br>
   <span class="k">阈值</span> 右上角滑杆实时调节<br>
   <span class="k">先载入</span> 你自己的视频文件
 </div>
@@ -233,6 +233,29 @@ function resizeSkel() {
 addEventListener('resize', resizeSkel);
 
 /* ---------- 手势判定 ---------- */
+/* ---------- 只识别食指与拇指 ---------- */
+/* 判断某根手指是否伸展：指尖离掌心比该指第二关节更远 */
+function fingerExtended(lm, tipIdx, pipIdx) {
+  const palm = lm[9], r = scaleOf(lm);
+  return d2(lm[tipIdx], palm) > d2(lm[pipIdx], palm) * 1.12;
+}
+/* 该手是否为「食指+拇指张开」的框角手势：这两指伸展，其余三指收拢 */
+function isFrameHand(lm) {
+  const palm = lm[9], r = scaleOf(lm);
+  const index = fingerExtended(lm, 8, 6);
+  const thumb = fingerExtended(lm, 4, 2);
+  const others = [12, 16, 20].every(i => d2(lm[i], palm) < r * 1.5);
+  return index && thumb && others;
+}
+/* 取该手的两个框角点：食指指尖与拇指指尖 */
+function frameCorners(lm) {
+  return [lm[8], lm[4]];
+}
+/* 食指-拇指张开的跨度，用于确认确实在"比框" */
+function frameSpan(lm) {
+  return d2(lm[4], lm[8]) / scaleOf(lm);
+}
+
 const d2 = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const scaleOf = lm => d2(lm[0], lm[9]) || 0.1;
 function isPinchedPoint(lm) {
@@ -273,18 +296,32 @@ function drawSkeleton(list, hasPoint) {
       sctx.beginPath(); sctx.moveTo(A.x, A.y); sctx.lineTo(B.x, B.y); sctx.stroke();
     }
     sctx.shadowBlur = 0;
-    sctx.fillStyle = CYAN + '.8)';
+
+    // 非关键关节：淡化的小点
+    sctx.fillStyle = CYAN + '.45)';
     for (let i = 0; i < lm.length; i++) {
-      if ([4,8,12,16,20].includes(i)) continue;
+      if ([4, 8, 12, 16, 20].includes(i)) continue;
       const q = pt(lm[i]);
-      sctx.beginPath(); sctx.arc(q.x, q.y, 2.2, 0, Math.PI * 2); sctx.fill();
+      sctx.beginPath(); sctx.arc(q.x, q.y, 1.8, 0, Math.PI * 2); sctx.fill();
     }
-    for (const i of [4, 8, 12, 16, 20]) {
+
+    // 其余三指：收拢时几乎不显示（说明没被使用）
+    for (const i of [12, 16, 20]) {
       const q = pt(lm[i]);
-      sctx.shadowColor = isPointHand ? CYAN + '1)' : PINK + '1)';
-      sctx.shadowBlur = 18;
-      sctx.fillStyle = isPointHand ? PINK + '.98)' : PINK + '.95)';
-      sctx.beginPath(); sctx.arc(q.x, q.y, 4.6, 0, Math.PI * 2); sctx.fill();
+      const used = !isFrameHand(lm);
+      sctx.fillStyle = used ? CYAN + '.75)' : CYAN + '.25)';
+      sctx.beginPath(); sctx.arc(q.x, q.y, used ? 4 : 2.4, 0, Math.PI * 2); sctx.fill();
+    }
+
+    // 四个关键点：食指(8) 与 拇指(4)，用粉色高亮加光环
+    for (const i of [4, 8]) {
+      const q = pt(lm[i]);
+      sctx.shadowColor = PINK + '1)'; sctx.shadowBlur = 26;
+      sctx.fillStyle = PINK + '.98)';
+      sctx.beginPath(); sctx.arc(q.x, q.y, 7, 0, Math.PI * 2); sctx.fill();
+      sctx.strokeStyle = CYAN + '.95)'; sctx.lineWidth = 2.2;
+      sctx.beginPath(); sctx.arc(q.x, q.y, 13, 0, Math.PI * 2); sctx.stroke();
+      sctx.shadowBlur = 0;
     }
     sctx.shadowBlur = 0;
   });
@@ -313,8 +350,8 @@ function drawSkeleton(list, hasPoint) {
     }
   }
 
-  // 矩形框：食指(8) 与 拇指(4) 构成的框
-  if (mode === 'rect' && list[0] && list[1]) {
+  // 四边形框：完全由两手的食指(8)与拇指(4)这四点构成
+  if (mode === 'rect' && list[0] && list[1] && isFrameHand(list[0]) && isFrameHand(list[1])) {
     const a = list[0], b = list[1];
     const p = projectRect(a, b);
     sctx.strokeStyle = CYAN + '.95)'; sctx.lineWidth = 3.4;
@@ -517,7 +554,8 @@ function onHands(list) {
     return;
   }
 
-  if (list.length >= 2) {
+  // 双手都必须是「食指+拇指伸展」的框手，才认这四个点
+  if (list.length >= 2 && isFrameHand(list[0]) && isFrameHand(list[1])) {
     const a = list[0], b = list[1];
     const g = computeRectGeo(a, b);
     rect = g;
@@ -550,7 +588,12 @@ function onHands(list) {
       setState('FULL / 全屏播放', '已进入全屏 — 不会因手势变化退出', 'full');
     }
 
-    else setState('RECT / 抠洞', '食指与拇指构成矩形 — 透过它看视频', 'live');
+    else setState('RECT / 抠洞', '四指比框 — 透过四边形看视频', 'live');
+    return;
+  }
+  if (list.length >= 2) {
+    mode = 'point'; pointPos = null; targetReveal = 0;
+    setState('双手已识别 / 请伸食指拇指', '每只手都伸出食指与拇指，其余三指收拢', 'warn');
     return;
   }
 
