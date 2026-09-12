@@ -52,6 +52,16 @@
   #meta{margin-top:6px;font-size:9px;color:#5c7fa8;display:flex;gap:12px;flex-wrap:wrap}
   #loadState{margin-top:6px;font-size:9px;color:#8fb0dd;max-width:46vw;word-break:break-all}
 
+  #modeTag{position:fixed;z-index:12;left:50%;top:calc(64px + env(safe-area-inset-top));
+    transform:translateX(-50%);font-size:22px;font-weight:700;letter-spacing:.24em;
+    padding:9px 26px;border-radius:10px;pointer-events:none;opacity:0;transition:opacity .3s;
+    font-family:Consolas,monospace;white-space:nowrap}
+  #modeTag.fan{opacity:1;color:#ffd0f0;background:rgba(60,10,45,.72);
+    border:1px solid rgba(255,92,200,.75);box-shadow:0 0 30px rgba(255,92,200,.45);
+    text-shadow:0 0 18px rgba(255,92,200,1)}
+  #modeTag.rect{opacity:1;color:#cdf6ff;background:rgba(8,32,52,.72);
+    border:1px solid rgba(57,230,255,.75);box-shadow:0 0 30px rgba(57,230,255,.4);
+    text-shadow:0 0 18px rgba(57,230,255,1)}
   #diag{position:fixed;z-index:11;left:20px;bottom:calc(18px + env(safe-area-inset-bottom));
     font-size:10px;line-height:1.75;color:#9fe6ff;background:rgba(4,12,24,.82);
     border:1px solid rgba(57,230,255,.35);border-radius:9px;padding:9px 13px;
@@ -157,6 +167,7 @@
   <input id="fw" type="range" min="0" max="24" step="1" value="8">
 </div>
 
+<div id="modeTag"></div>
 <div id="diag"></div>
 <div id="hint"></div>
 
@@ -225,6 +236,7 @@ let liveQuad = null;   // 当前四边形四点（屏幕坐标）
 let lastArea = 0;      // 最近一次的四边形占屏比例
 let diagTick = 0;
 let diagEl = null;
+let modeTagEl = null;
 let FULL_THRESHOLD = 0.80;          // 可调：矩形占屏比例阈值（全屏触发）
 let isFull = false;                 // 是否已进入全屏（带滞回）
 let rect = { x: 0, y: 0, w: 0, h: 0, cx: 0, cy: 0, ang: 0 };
@@ -525,23 +537,53 @@ function randBinCached(i) { return _binStream[i % _binStream.length]; }
    点 → 五个指尖 辐射连线，相邻两线夹出一个三角形，共 4 个三角形
    每个三角形内施加一种不同的滤镜 */
 
-/* 一只手是否"五指攥在一起"：五指指尖互相靠近且贴近掌心 */
-function isClenched(lm) {
+/* ---------- 攥拳 / 张开 的连续置信度（0~1）----------
+   用连续打分替代布尔判定，便于滞回与可视化 */
+function clenchScore(lm) {
   const palm = lm[9], r = scaleOf(lm);
-  const tips = [4, 8, 12, 16, 20];
-  const near = tips.every(i => d2(lm[i], palm) < r * 1.25);
-  if (!near) return false;
-  // 五指尖彼此的离散程度也要小
+  const TIPS = [4, 8, 12, 16, 20];
+  // ① 每个指尖到掌心的平均距离（越小越像攥拳）
+  let nearSum = 0;
+  for (const i of TIPS) nearSum += Math.min(1.6, d2(lm[i], palm) / r);
+  const nearAvg = nearSum / TIPS.length;              // ~0.6 攥紧, ~2.0 张开
+  const nearScore = clamp01((1.45 - nearAvg) / 0.85); // 1.45 以上算张开
+  // ② 指尖之间的紧凑度
   let maxd = 0;
-  for (let i = 0; i < tips.length; i++)
-    for (let j = i + 1; j < tips.length; j++)
-      maxd = Math.max(maxd, d2(lm[tips[i]], lm[tips[j]]));
-  return maxd < r * 1.5;
+  for (let i = 0; i < TIPS.length; i++)
+    for (let j = i + 1; j < TIPS.length; j++)
+      maxd = Math.max(maxd, d2(lm[TIPS[i]], lm[TIPS[j]]) / r);
+  const tightScore = clamp01((1.9 - maxd) / 1.1);
+  // ③ 指尖到掌心的平均 z 深度（攥拳时更贴近掌心平面）
+  let zSum = 0;
+  for (const i of TIPS) zSum += Math.abs((lm[i].z || 0) - (palm.z || 0));
+  const zAvg = zSum / TIPS.length;
+  const flatScore = clamp01((0.16 - zAvg) / 0.12);
+  return clamp01(nearScore * 0.5 + tightScore * 0.35 + flatScore * 0.15);
 }
-/* 另一只手是否五指张开 */
-function isSpread(lm) {
+function spreadScore(lm) {
   const palm = lm[9], r = scaleOf(lm);
-  return [8, 12, 16, 20].filter(i => d2(lm[i], palm) > r * 1.75).length >= 4;
+  const out = [8, 12, 16, 20].filter(i => d2(lm[i], palm) > r * 1.7).length;
+  const thumb = d2(lm[4], palm) > r * 1.3 ? 1 : 0;
+  return clamp01((out + thumb) / 5);
+}
+function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+
+/* 滞回：进入需 ≥ ON，退出需 < OFF，避免临界抖动 */
+const CLENCH_ON = 0.62, CLENCH_OFF = 0.42;
+const SPREAD_ON = 0.60, SPREAD_OFF = 0.40;
+let clenchLatched = false, spreadLatched = false;
+/* 带滞回的稳定判定（对外只暴露结果，分数在分支里计算） */
+function isClenched(lm) {
+  const s = clenchScore(lm);
+  if (clenchLatched) { if (s < CLENCH_OFF) clenchLatched = false; }
+  else if (s >= CLENCH_ON) clenchLatched = true;
+  return clenchLatched;
+}
+function isSpread(lm) {
+  const s = spreadScore(lm);
+  if (spreadLatched) { if (s < SPREAD_OFF) spreadLatched = false; }
+  else if (s >= SPREAD_ON) spreadLatched = true;
+  return spreadLatched;
 }
 /* 攥拳手的汇聚点：五指尖的质心 */
 function clenchedPoint(lm) {
@@ -865,6 +907,12 @@ function renderMask() {
   }
 
   // 全屏接管：整体淡出摄像头层
+  // 模式标签：明确区分「滤镜三角形」与「四边形抠洞」
+  if (modeTagEl) {
+    if (mode === 'fan') { modeTagEl.textContent = '◆ 4 三角形滤镜'; modeTagEl.className = 'fan'; }
+    else if (mode === 'rect') { modeTagEl.textContent = '▢ 四边形抠洞'; modeTagEl.className = 'rect'; }
+    else modeTagEl.className = '';
+  }
   // 扇形模式：在三角形区域叠加滤镜色调
   if (mode === 'fan' && fanTriangles.length) renderFanFilters();
 
@@ -947,11 +995,17 @@ function onHands(list) {
   // 【最高优先级】扇形模式：一只手五指攥紧=一个点，另一只手五指张开
   // 点与五个指尖辐射连线，相邻两线夹出 4 个三角形，各施加一种滤镜
   if (list.length >= 2) {
-    let ci = -1, si = -1;
+    // 对每只手算置信度，取最像攥拳的 / 最像张开的，且必须高于对方的握拳分
+    let ci = -1, si = -1, bestCl = -1, bestSp = -1;
     for (let i = 0; i < list.length; i++) {
-      if (ci < 0 && isClenched(list[i])) ci = i;
-      else if (si < 0 && isSpread(list[i])) si = i;
+      const c = clenchScore(list[i]), s = spreadScore(list[i]);
+      list[i].__clench = c; list[i].__spread = s;
+      // 同一只手不可能既攥紧又完全张开：要求分差明显
+      if (c >= CLENCH_ON && c > s + 0.15 && c > bestCl) { bestCl = c; ci = i; }
+      if (s >= SPREAD_ON && s > c + 0.15 && s > bestSp) { bestSp = s; si = i; }
     }
+    // 强制互斥：两只手必须是同一只
+    if (ci === si) { ci = -1; si = -1; }
     if (ci >= 0 && si >= 0) {
       const cp = clenchedPoint(list[ci]);
       const apex = { x: (1 - cp.x) * CANVAS_W, y: cp.y * CANVAS_H };
@@ -1229,7 +1283,11 @@ function loop() {
     diagEl.innerHTML =
       '摄像头 ' + camTxt + ' | 视频 ' + vidTxt + '\n' +
       '画布 mask ' + maskCanvas.width + 'x' + maskCanvas.height + ' vlay ' + vlayer.width + 'x' + vlayer.height + '\n' +
-      '手 ' + lastList.length + ' | mode ' + mode + ' | reveal ' + R(reveal, 2) + ' | fullMix ' + R(fullMix, 2) + '\n' +
+      '手 ' + lastList.length + ' | mode <span class="' + (mode === 'fan' ? 'ok2' : (mode === 'rect' ? 'warn2' : '')) + '">' + mode + '</span>' +
+      ' | reveal ' + R(reveal, 2) + ' | fullMix ' + R(fullMix, 2) + '\n' +
+      '握拳分 ' + lastList.map(l => R(l.__clench || 0, 2)).join(' / ') +
+      '  张开分 ' + lastList.map(l => R(l.__spread || 0, 2)).join(' / ') +
+      '  (需握≥' + CLENCH_ON + ' 张≥' + SPREAD_ON + ')\n' +
       '四点 ' + q + '\n' +
       '占屏 <span class="' + (lastArea >= FULL_THRESHOLD ? 'ok2' : 'warn2') + '">' + R(lastArea * 100, 1) + '%</span>' +
       ' / 阈值 ' + R(FULL_THRESHOLD * 100, 0) + '% | isFull ' + (isFull ? 'Y' : 'N');
@@ -1238,6 +1296,7 @@ function loop() {
 loop();
 resizeSkel();
 diagEl = document.getElementById('diag');
+modeTagEl = document.getElementById('modeTag');
 window.__ready = true;
 if (bootEl) bootEl.style.display = 'none';
 </script>
