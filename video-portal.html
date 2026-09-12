@@ -692,14 +692,10 @@ let fanTips = [];
 
 function drawFanUI(apex, tips, t) {
   if (!apex || !tips || tips.length < 5) return;
-  fanApex = apex; fanTips = tips;
-  fanTriangles = [];
-
   sctx.save();
 
   for (let i = 0; i < 4; i++) {
     const A = tips[i], B = tips[i + 1];
-    fanTriangles.push([apex, A, B]);
 
     // 三角形填充：半透明滤镜色
     const col = ['rgba(57,230,255,', 'rgba(255,92,200,', 'rgba(255,180,60,', 'rgba(170,90,255,'][i];
@@ -1208,6 +1204,9 @@ function onHands(list) {
         return { x: (1 - p.x) * CANVAS_W, y: p.y * CANVAS_H };
       });
       fanApex = apex; fanTips = tips;
+      // 立即算出 4 个三角形（供滤镜层使用，不依赖绘制函数）
+      fanTriangles = [];
+      for (let i = 0; i < 4; i++) fanTriangles.push([apex, tips[i], tips[i + 1]]);
       // 已处于扇形时：直接维持，不再要求重新确认（避免转动时断续）
       if (mode === 'fan') {
         fanHoldFrames = 8;   // 保持若干帧，容忍瞬时丢失
