@@ -771,31 +771,46 @@ function drawFanUI(apex, tips, t) {
 }
 
 /* 在遮罩层为三角形区域施加滤镜（先挖洞透出视频，再叠滤镜色） */
+/* 离屏画布：用于生成带滤镜的视频帧 */
+const fxCanvas = document.createElement('canvas');
+const fxctx = fxCanvas.getContext('2d');
+
 function renderFanFilters() {
   if (!fanTriangles.length || bgVideo.readyState < 2) return;
   const W = vlayer.width, H = vlayer.height;
+  if (fxCanvas.width !== W || fxCanvas.height !== H) { fxCanvas.width = W; fxCanvas.height = H; }
+
   for (let i = 0; i < fanTriangles.length; i++) {
     const [A, B, C] = fanTriangles[i];
+
+    // 1) 在离屏画布上生成"带该滤镜的整帧视频"
+    fxctx.setTransform(1, 0, 0, 1, 0, 0);
+    fxctx.globalAlpha = 1;
+    fxctx.globalCompositeOperation = 'source-over';
+    fxctx.clearRect(0, 0, W, H);
+    fxctx.filter = FILTERS[i].f;
+    fxctx.drawImage(bgVideo, 0, 0, W, H);
+    fxctx.filter = 'none';
+
+    // 2) 用三角形裁剪，把滤镜帧贴到视频层
     vctx.save();
-    // 只在该三角形区域内处理
     vctx.beginPath();
     vctx.moveTo(A.x, A.y); vctx.lineTo(B.x, B.y); vctx.lineTo(C.x, C.y);
     vctx.closePath();
     vctx.clip();
-    // 真正把滤镜应用到视频画面上
-    vctx.filter = FILTERS[i].f;
-    vctx.globalAlpha = 0.92;
-    vctx.drawImage(bgVideo, 0, 0, W, H);
-    vctx.filter = 'none';
-    vctx.globalAlpha = 1;
-    // 叠加一层色调，让滤镜感更明显
-    const col = ['rgba(57,230,255,', 'rgba(255,92,200,', 'rgba(255,180,60,', 'rgba(170,90,255,'][i];
-    vctx.globalCompositeOperation = 'overlay';
-    vctx.fillStyle = col + '0.30)';
-    vctx.fillRect(0, 0, W, H);
     vctx.globalCompositeOperation = 'source-over';
+    vctx.drawImage(fxCanvas, 0, 0);
+
+    // 3) 叠加色调，进一步强化滤镜差异
+    const col = ['rgba(57,230,255,', 'rgba(255,92,200,', 'rgba(255,180,60,', 'rgba(170,90,255,'][i];
+    vctx.globalCompositeOperation = 'lighter';
+    vctx.fillStyle = col + '0.18)';
+    vctx.fillRect(0, 0, W, H);
     vctx.restore();
   }
+  vctx.globalCompositeOperation = 'source-over';
+  vctx.filter = 'none';
+  vctx.globalAlpha = 1;
 }
 
 /* ---------- 用两手的食指与拇指构造矩形 ---------- */
@@ -828,6 +843,9 @@ function drawVideoFull() {
   const W = vlayer.width, H = vlayer.height;
   if (!W || !H) return;
   vctx.setTransform(1, 0, 0, 1, 0, 0);
+  vctx.filter = 'none';
+  vctx.globalAlpha = 1;
+  vctx.globalCompositeOperation = 'source-over';
   vctx.clearRect(0, 0, W, H);
   if (bgVideo.readyState >= 2 && bgVideo.videoWidth) {
     // 视频全屏铺满，保持宽高比裁剪（cover），位置固定不动。
@@ -1243,8 +1261,17 @@ function onHands(list) {
 
     // 洞占屏比例 → 决定 reveal 与全屏
     liveQuad = smoothRect.pts;
-    // 用平滑后的面积，避免抖动导致阈值判定不稳
-    const area = smoothRect.area / (CANVAS_W * CANVAS_H);
+    // 占屏比例 = 四边形包围盒覆盖屏幕的比例（更符合"撑开多大"的直觉）
+    const q = smoothRect.pts;
+    let minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
+    for (const p of q) {
+      if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+    }
+    const bw = Math.max(0, Math.min(CANVAS_W, maxX) - Math.max(0, minX));
+    const bh = Math.max(0, Math.min(CANVAS_H, maxY) - Math.max(0, minY));
+    // 取宽高比例的较小者（两边都撑开到才算数）
+    const area = Math.min(bw / CANVAS_W, bh / CANVAS_H);
     targetReveal = 1;   // 口子始终完全透出视频
     lastArea = area;
     if (!isFull) {
