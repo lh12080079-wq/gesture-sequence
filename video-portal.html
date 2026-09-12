@@ -1051,10 +1051,15 @@ function onHands(list) {
   const now = performance.now();
   handsEl.textContent = 'HANDS: ' + list.length;
 
-  /* 没有手：无论是否全屏，都要清理状态（避免残留冻结） */
+  /* 已全屏：完全锁定，只播放视频；手离开/变化都不影响，仅"退出全屏"按钮可解除 */
+  if (isFull) {
+    handsEl.textContent = list.length ? ('HANDS: ' + list.length + ' / 全屏播放中') : 'HANDS: 全屏播放中';
+    return;
+  }
+
+  /* 没有手：清理残留状态（未全屏时） */
   if (!list.length) {
     if (now - lastSeen > 300) {
-      if (isFull) { exitFull(); }
       mode = 'idle';
       targetReveal = 0; reveal = 0;
       targetFull = 0; fullMix = 0;
@@ -1064,8 +1069,6 @@ function onHands(list) {
     }
     return;
   }
-  /* 已全屏：仅在有手时保持锁定，手离开则上面的分支会退出全屏 */
-  if (isFull) { handsEl.textContent = 'HANDS: ' + list.length + ' / 全屏'; return; }
   lastSeen = now;
 
   // 【最高优先级】扇形模式：一只手五指攥紧=一个点，另一只手五指张开
@@ -1371,12 +1374,14 @@ function loop() {
     : 'FULLSCREEN PROGRESS (' + Math.round(FULL_THRESHOLD * 100) + '%)';
   const exBtn = $('#exitFull');
   if (exBtn) exBtn.style.display = isFull ? 'inline-block' : 'none';
-  renderMask();
-  // 视频层：始终全屏播放视频本体（固定不动）
-  drawVideoFull();
   if (isFull) {
+    // 全屏：清空摄像头遮罩层与骨架层，只保留视频
+    if (maskCanvas.width) mctx.setTransform(1, 0, 0, 1, 0, 0), mctx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
     if (skel.width) sctx.clearRect(0, 0, skel.width, skel.height);
+    drawVideoFull();
   } else {
+    renderMask();
+    drawVideoFull();
     if (mode === 'fan' && fanApex && fanTips.length === 5) {
       drawFanUI(fanApex, fanTips, performance.now());
     } else {
