@@ -1160,11 +1160,27 @@ function onHands(list) {
       setState('已退出四边形', '手指松开 — 重新收紧六指可再次触发', '');
     }
     mode = 'idle';
-    const cs = curls.map(c => c.toFixed(2)).join(' / ');
-    const os = opens.join(' / ');
-    setState('收紧其余六指才触发四边形',
-      '两手都：中/无名/小指收拢(收拢分 ' + cs + ' 需≥' + CURL_ON + ')，食指+拇指伸展(开 ' + os + '/2)', 'warn');
+    // 逐手显示达标情况，明确告诉用户缺哪只手
+    const detail = list.map((lm, i) => {
+      const c = (lm.__curl || 0), o = lm.__open3 ? 'Y' : 'N';
+      const ok = (c >= CURL_ON && o === 'Y') ? '✓' : '✗';
+      return '手' + (i + 1) + ' 收拢' + c.toFixed(2) + ' 开指' + o + ' ' + ok;
+    }).join('   ');
+    const ready = list.filter(lm => (lm.__curl || 0) >= CURL_ON && lm.__open3).length;
+    setState('需两只手都达标（当前 ' + ready + '/2）', detail, ready > 0 ? 'warn' : '');
     return;
+  }
+
+  // 单手：若这只手已满足"六指收紧+食指拇指伸开"，提示需要另一只手
+  if (list.length === 1) {
+    const c1 = list[0].__curl || 0, o1 = list[0].__open3 ? 'Y' : 'N';
+    if (c1 >= CURL_ON && o1 === 'Y') {
+      mode = 'idle'; liveQuad = null; smoothRect = null;
+      targetReveal = 0; targetFull = 0;
+      setState('已达标 / 再放入另一只手',
+        '这只手 收拢' + c1.toFixed(2) + ' 开指' + o1 + ' ✓ — 两只手都这样才构成四边形', 'ok');
+      return;
+    }
   }
 
   // 单手：若五指并拢或握拳，视为一个点
