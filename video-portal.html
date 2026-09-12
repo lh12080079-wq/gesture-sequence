@@ -587,7 +587,7 @@ let clenchLatched = false, spreadLatched = false;
 
 /* ---- 模式稳定性：连续 N 帧一致才切换，避免抖动 ---- */
 let candMode = null, candCount = 0;
-const MODE_CONFIRM = 9;        // 需连续 9 帧（约 270ms）确认，减少误触发
+const MODE_CONFIRM = 5;        // 需连续 5 帧（约 150ms）确认，兼顾稳定与响应
 function confirmMode(next) {
   if (next === mode) { candMode = null; candCount = 0; return true; }
   if (next === candMode) { candCount++; }
@@ -1073,12 +1073,10 @@ function onHands(list) {
     }
   }
 
-  // 四边形模式：两手「其余六指全部收紧」+ 食指拇指张开，且需连续帧确认
+  // 四边形模式：两手「其余六指全部收紧」即触发（食指拇指自然张开用于取框角）
   const curls = list.map(lm => (lm.__curl = curlScore(lm)));
   const opens = list.map(lm => (lm.__open2 = indexThumbOpen(lm) ? 1 : 0));
-  const bothCurled = list.length >= 2 &&
-    curls.every(c => c >= CURL_ON) &&
-    list.every(lm => indexThumbOpen(lm));
+  const bothCurled = list.length >= 2 && curls.every(c => c >= CURL_ON);
   if (bothCurled && confirmMode('rect')) {
     const a = list[0], b = list[1];
     const g = computeRectGeo(a, b);
@@ -1357,7 +1355,8 @@ function loop() {
       ' | reveal ' + R(reveal, 2) + ' | fullMix ' + R(fullMix, 2) + '\n' +
       '握拳 ' + lastList.map(l => tagNum(l.__clench, CLENCH_ON)).join(' ') +
       ' 张开 ' + lastList.map(l => tagNum(l.__spread, SPREAD_ON)).join(' ') +
-      ' 收拢 ' + lastList.map(l => tagNum(l.__curl, CURL_ON)).join(' ') + '\n' +
+      ' 收拢 ' + lastList.map(l => tagNum(l.__curl, CURL_ON)).join(' ') +
+      ' 开指 ' + lastList.map(l => (l.__open2 || 0) + '/2').join(' ') + '\n' +
       '↑ 绿=达标(握≥' + CLENCH_ON + ' 张≥' + SPREAD_ON + ' 收拢≥' + CURL_ON + ')\n' +
       '四点 ' + q + '\n' +
       '占屏 <span class="' + (lastArea >= FULL_THRESHOLD ? 'ok2' : 'warn2') + '">' + R(lastArea * 100, 1) + '%</span>' +
