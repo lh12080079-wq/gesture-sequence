@@ -52,16 +52,6 @@
   #meta{margin-top:6px;font-size:9px;color:#5c7fa8;display:flex;gap:12px;flex-wrap:wrap}
   #loadState{margin-top:6px;font-size:9px;color:#8fb0dd;max-width:46vw;word-break:break-all}
 
-  #modeTag{position:fixed;z-index:12;left:50%;top:calc(64px + env(safe-area-inset-top));
-    transform:translateX(-50%);font-size:22px;font-weight:700;letter-spacing:.24em;
-    padding:9px 26px;border-radius:10px;pointer-events:none;opacity:0;transition:opacity .3s;
-    font-family:Consolas,monospace;white-space:nowrap}
-  #modeTag.fan{opacity:1;color:#ffd0f0;background:rgba(60,10,45,.72);
-    border:1px solid rgba(255,92,200,.75);box-shadow:0 0 30px rgba(255,92,200,.45);
-    text-shadow:0 0 18px rgba(255,92,200,1)}
-  #modeTag.rect{opacity:1;color:#cdf6ff;background:rgba(8,32,52,.72);
-    border:1px solid rgba(57,230,255,.75);box-shadow:0 0 30px rgba(57,230,255,.4);
-    text-shadow:0 0 18px rgba(57,230,255,1)}
   #diag{position:fixed;z-index:11;left:20px;bottom:calc(18px + env(safe-area-inset-bottom));
     font-size:10px;line-height:1.75;color:#9fe6ff;background:rgba(4,12,24,.82);
     border:1px solid rgba(57,230,255,.35);border-radius:9px;padding:9px 13px;
@@ -167,7 +157,6 @@
   <input id="fw" type="range" min="0" max="24" step="1" value="8">
 </div>
 
-<div id="modeTag"></div>
 <div id="diag"></div>
 <div id="hint"></div>
 
@@ -176,7 +165,8 @@
   <span class="p">扇形滤镜</span>：一手攥拳·一手张开五指<br>
   <span class="k">点→五指辐射</span> → 夹出 4 个三角形<br>
   <span class="k">每个三角形</span> 一种不同滤镜<br>
-  <span class="p">四指框</span>：两手食指+拇指构成四边形<br>
+  <span class="p">四边形</span>：两手都收紧中指/无名指/小指<br>
+  <span class="k">只伸食指+拇指</span> → 构成四边形抠洞<br>
   <span class="k">其余三指收拢</span> → 才算有效框手<br>
   <span class="p">四点连线</span> → 构成任意四边形<br>
   <span class="k">四边形内</span> 实时透出视频画面<br>
@@ -236,7 +226,6 @@ let liveQuad = null;   // 当前四边形四点（屏幕坐标）
 let lastArea = 0;      // 最近一次的四边形占屏比例
 let diagTick = 0;
 let diagEl = null;
-let modeTagEl = null;
 let FULL_THRESHOLD = 0.80;          // 可调：矩形占屏比例阈值（全屏触发）
 let isFull = false;                 // 是否已进入全屏（带滞回）
 let rect = { x: 0, y: 0, w: 0, h: 0, cx: 0, cy: 0, ang: 0 };
@@ -572,6 +561,32 @@ function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
 const CLENCH_ON = 0.62, CLENCH_OFF = 0.42;
 const SPREAD_ON = 0.60, SPREAD_OFF = 0.40;
 let clenchLatched = false, spreadLatched = false;
+/* 四边形模式专用：一只手的"其余三指"必须收紧
+   食指(8)与拇指(4)用来构成框角，中指(12)/无名指(16)/小指(20)必须收拢 */
+function curlScore(lm) {
+  const palm = lm[9], r = scaleOf(lm);
+  const OTHERS = [12, 16, 20];
+  let sum = 0;
+  for (const i of OTHERS) sum += Math.min(1.8, d2(lm[i], palm) / r);
+  const avg = sum / OTHERS.length;
+  // 指尖离掌心越近分越高（0.9 以下算收拢）
+  return clamp01((1.45 - avg) / 0.6);
+}
+const CURL_ON = 0.60, CURL_OFF = 0.40;
+function isOthersCurled(lm) {
+  const s = curlScore(lm);
+  lm.__curl = s;
+  return s >= CURL_ON;
+}
+/* 食指与拇指必须张开（构成框角） */
+function indexThumbOpen(lm) {
+  const palm = lm[9], r = scaleOf(lm);
+  const idx = d2(lm[8], palm) > r * 1.45;
+  const th = d2(lm[4], palm) > r * 1.05;
+  lm.__open2 = (idx ? 1 : 0) + (th ? 1 : 0);
+  return idx && th;
+}
+
 /* 带滞回的稳定判定（对外只暴露结果，分数在分支里计算） */
 function isClenched(lm) {
   const s = clenchScore(lm);
@@ -907,12 +922,6 @@ function renderMask() {
   }
 
   // 全屏接管：整体淡出摄像头层
-  // 模式标签：明确区分「滤镜三角形」与「四边形抠洞」
-  if (modeTagEl) {
-    if (mode === 'fan') { modeTagEl.textContent = '◆ 4 三角形滤镜'; modeTagEl.className = 'fan'; }
-    else if (mode === 'rect') { modeTagEl.textContent = '▢ 四边形抠洞'; modeTagEl.className = 'rect'; }
-    else modeTagEl.className = '';
-  }
   // 扇形模式：在三角形区域叠加滤镜色调
   if (mode === 'fan' && fanTriangles.length) renderFanFilters();
 
@@ -1024,8 +1033,10 @@ function onHands(list) {
     mode = 'rect';
   }
 
-  // 四点四边形模式
-  if (list.length >= 2) {
+  // 四边形模式：必须两手都「其余三指收紧 + 食指拇指张开」才识别
+  const bothFraming = list.length >= 2 &&
+    list.every(lm => isOthersCurled(lm) && indexThumbOpen(lm));
+  if (bothFraming) {
     const a = list[0], b = list[1];
     const g = computeRectGeo(a, b);
     rect = g;
@@ -1063,6 +1074,15 @@ function onHands(list) {
         setState('RECT / 抠洞 ' + Math.round(area * 100) + '%', '四指比框 — 透过四边形看视频', 'live');
       }
     }
+    return;
+  }
+
+  // 检测到两只手但姿态不符：明确提示
+  if (list.length >= 2 && !bothFraming) {
+    mode = 'idle'; liveQuad = null; smoothRect = null;
+    targetReveal = 0; targetFull = 0;
+    const curls = list.map(lm => (lm.__curl || 0).toFixed(2)).join(' / ');
+    setState('请收紧其余六指', '两手都：中指/无名指/小指收拢，只伸食指+拇指（收拢分 ' + curls + '，需≥' + CURL_ON + '）', 'warn');
     return;
   }
 
@@ -1285,9 +1305,10 @@ function loop() {
       '画布 mask ' + maskCanvas.width + 'x' + maskCanvas.height + ' vlay ' + vlayer.width + 'x' + vlayer.height + '\n' +
       '手 ' + lastList.length + ' | mode <span class="' + (mode === 'fan' ? 'ok2' : (mode === 'rect' ? 'warn2' : '')) + '">' + mode + '</span>' +
       ' | reveal ' + R(reveal, 2) + ' | fullMix ' + R(fullMix, 2) + '\n' +
-      '握拳分 ' + lastList.map(l => R(l.__clench || 0, 2)).join(' / ') +
-      '  张开分 ' + lastList.map(l => R(l.__spread || 0, 2)).join(' / ') +
-      '  (需握≥' + CLENCH_ON + ' 张≥' + SPREAD_ON + ')\n' +
+      '握拳 ' + lastList.map(l => R(l.__clench || 0, 2)).join('/') +
+      ' 张开 ' + lastList.map(l => R(l.__spread || 0, 2)).join('/') +
+      ' 收拢 ' + lastList.map(l => R(l.__curl || 0, 2)).join('/') +
+      '\n需: 握≥' + CLENCH_ON + ' 张≥' + SPREAD_ON + ' 收拢≥' + CURL_ON + '\n' +
       '四点 ' + q + '\n' +
       '占屏 <span class="' + (lastArea >= FULL_THRESHOLD ? 'ok2' : 'warn2') + '">' + R(lastArea * 100, 1) + '%</span>' +
       ' / 阈值 ' + R(FULL_THRESHOLD * 100, 0) + '% | isFull ' + (isFull ? 'Y' : 'N');
@@ -1296,7 +1317,6 @@ function loop() {
 loop();
 resizeSkel();
 diagEl = document.getElementById('diag');
-modeTagEl = document.getElementById('modeTag');
 window.__ready = true;
 if (bootEl) bootEl.style.display = 'none';
 </script>
