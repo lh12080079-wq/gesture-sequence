@@ -16,21 +16,23 @@
 
   /* 上层：摄像头 + 挖洞遮罩（同一张画布，洞是透明的） */
   #mask{position:fixed;left:0;top:0;width:100%;height:100%;z-index:2;pointer-events:none}
+  /* 视频层：位于摄像头遮罩之上、装饰之下，专门按四边形透视绘制 */
+  #vlayer{position:fixed;left:0;top:0;width:100%;height:100%;z-index:3;pointer-events:none}
 
   /* 隐藏的取景源 */
   #cam{position:fixed;left:-9999px;top:0;width:2px;height:2px;opacity:0;pointer-events:none}
 
   /* 骨架叠加 */
-  #skel{position:fixed;inset:0;width:100%;height:100%;z-index:3;pointer-events:none}
+  #skel{position:fixed;inset:0;width:100%;height:100%;z-index:4;pointer-events:none}
 
   /* 网格 / 扫描 / 颗粒 */
-  #grid{position:fixed;inset:0;z-index:4;pointer-events:none;opacity:.22;
+  #grid{position:fixed;inset:0;z-index:5;pointer-events:none;opacity:.22;
     background-image:linear-gradient(rgba(57,230,255,.18) 1px,transparent 1px),
                      linear-gradient(90deg,rgba(57,230,255,.18) 1px,transparent 1px);
     background-size:52px 52px;
     -webkit-mask-image:radial-gradient(circle at 50% 50%,#000 15%,transparent 72%);
     mask-image:radial-gradient(circle at 50% 50%,#000 15%,transparent 72%)}
-  #scan{position:fixed;inset:0;z-index:5;pointer-events:none;
+  #scan{position:fixed;inset:0;z-index:6;pointer-events:none;
     background:repeating-linear-gradient(180deg,rgba(120,220,255,.045) 0 1px,transparent 1px 4px)}
   #noise{position:fixed;inset:0;z-index:6;pointer-events:none;opacity:.05;mix-blend-mode:screen;
     background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='4'/></filter><rect width='140' height='140' filter='url(%23n)'/></svg>")}
@@ -114,6 +116,7 @@
 
 <!-- 上层：摄像头画面 + 挖洞后的透明遮罩 -->
 <canvas id="mask"></canvas>
+<canvas id="vlayer"></canvas>
 
 <!-- 取景源与骨架 -->
 <video id="cam" playsinline muted autoplay></video>
@@ -207,6 +210,7 @@ let mode = 'idle';            // idle | point | rect | full
 let reveal = 0, targetReveal = 0;   // 0..1 洞的张开度
 let fullMix = 0, targetFull = 0;    // 0..1 全屏混合
 let lastList = [];
+let liveQuad = null;   // 当前四边形四点（屏幕坐标）
 let FULL_THRESHOLD = 0.80;          // 可调：矩形占屏比例阈值（全屏触发）
 let isFull = false;                 // 是否已进入全屏（带滞回）
 let rect = { x: 0, y: 0, w: 0, h: 0, cx: 0, cy: 0, ang: 0 };
@@ -217,6 +221,7 @@ let lastSeen = 0, camOn = false, hasUserVideo = false;
 
 /* ---------- 画布 ---------- */
 const maskCanvas = $('#mask'), mctx = maskCanvas.getContext('2d');
+const vlayer = $('#vlayer'), vctx = vlayer.getContext('2d');
 
 /* ---------- 元素尺寸 ---------- */
 function resizeSkel() {
@@ -228,6 +233,9 @@ function resizeSkel() {
   const mw = Math.round(innerWidth * dpr), mh = Math.round(innerHeight * dpr);
   if (maskCanvas.width !== mw || maskCanvas.height !== mh) {
     maskCanvas.width = mw; maskCanvas.height = mh;
+  }
+  if (vlayer && (vlayer.width !== mw || vlayer.height !== mh)) {
+    vlayer.width = mw; vlayer.height = mh;
   }
 }
 addEventListener('resize', resizeSkel);
@@ -394,7 +402,9 @@ const warpCanvas = document.createElement('canvas');
 const wctx = warpCanvas.getContext('2d');
 let warpTmp = null, warpTmpCtx = null;
 function drawVideoWarp(q) {
-  const W = maskCanvas.width, H = maskCanvas.height;
+  const W = vlayer.width, H = vlayer.height;
+  vctx.clearRect(0, 0, W, H);
+  if (!q || q.length !== 4) return;
   if (warpCanvas.width !== W || warpCanvas.height !== H) {
     warpCanvas.width = W; warpCanvas.height = H;
   }
@@ -461,7 +471,17 @@ function drawVideoWarp(q) {
     }
   }
   wctx.putImageData(img, minX, minY);
-  mctx.drawImage(warpCanvas, 0, 0);
+  // 只把四边形内部画到独立视频层，避免被遮罩的擦除/羽化影响
+  vctx.save();
+  vctx.beginPath();
+  vctx.moveTo(q[0].x, q[0].y);
+  vctx.lineTo(q[1].x, q[1].y);
+  vctx.lineTo(q[2].x, q[2].y);
+  vctx.lineTo(q[3].x, q[3].y);
+  vctx.closePath();
+  vctx.clip();
+  vctx.drawImage(warpCanvas, 0, 0);
+  vctx.restore();
 }
 
 /* ---------- 遮罩渲染（摄像头为前景，洞口透出视频） ---------- */
@@ -511,21 +531,12 @@ function renderMask() {
       mctx.fill();
       mctx.filter = 'none';
 
-      // 1.5) 把视频按四边形做透视贴合，让画面与四边形对齐
-      if (bgVideo.readyState >= 2) {
-        mctx.save();
-        tracePath(pts, 0);
-        mctx.clip();
-        drawVideoWarp(pts);
-        mctx.restore();
-      }
-
       // 2) 羽化：沿四边形轮廓向外做渐进擦除
       if (FEATHER > 0) {
         const steps = 6;
+        mctx.globalAlpha = 0.9;
         for (let i = steps; i >= 1; i--) {
           const grow = FEATHER * (i / steps);
-          mctx.globalAlpha = 0.9;
           mctx.filter = 'blur(' + Math.round(1 + FEATHER * 0.3) + 'px)';
           tracePath(pts, grow);
           mctx.fillStyle = 'rgba(0,0,0,1)';
@@ -616,7 +627,7 @@ function onHands(list) {
   if (!list.length) {
     if (isFull) { handsEl.textContent = 'HANDS: 0 / 全屏已锁定'; return; }
     if (now - lastSeen > 350) {
-      mode = 'idle'; targetReveal = 0; pointPos = null;
+      mode = 'idle'; targetReveal = 0; pointPos = null; liveQuad = null;
       setState('IDLE', '把手放进画面', '');
     }
     return;
@@ -646,6 +657,7 @@ function onHands(list) {
     pointPos = null;
 
     // 洞占屏比例 → 决定 reveal 与全屏
+    liveQuad = smoothRect.pts;
     const area = rect.area / (skel.width * skel.height);
     targetReveal = 1;   // 口子始终完全透出视频
     // 撑满屏幕面积的 80% 时进入全屏，并锁定（不再响应手势）
@@ -824,6 +836,12 @@ function loop() {
   const exBtn = $('#exitFull');
   if (exBtn) exBtn.style.display = isFull ? 'inline-block' : 'none';
   renderMask();
+  // 视频透视贴合到当前四边形（画在独立层，始终与四边形对齐）
+  if (liveQuad && liveQuad.length === 4 && bgVideo.readyState >= 2) {
+    drawVideoWarp(liveQuad);
+  } else if (vlayer.width) {
+    vctx.clearRect(0, 0, vlayer.width, vlayer.height);
+  }
   if (isFull) {
     if (skel.width) sctx.clearRect(0, 0, skel.width, skel.height);
   } else {
