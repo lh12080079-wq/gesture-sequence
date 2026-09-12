@@ -284,7 +284,16 @@ function frameSpan(lm) {
 }
 
 const d2 = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+const d3 = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, (a.z || 0) - (b.z || 0));
 const scaleOf = lm => d2(lm[0], lm[9]) || 0.1;
+/* 真正的掌心：手腕(0) 与 中指根(9) 的中点，比用 lm[9] 更准 */
+function palmOf(lm) {
+  return {
+    x: (lm[0].x + lm[9].x) / 2,
+    y: (lm[0].y + lm[9].y) / 2,
+    z: ((lm[0].z || 0) + (lm[9].z || 0)) / 2
+  };
+}
 function isPinchedPoint(lm) {
   // 握拳也视作一个点
   if (isFist(lm)) return true;
@@ -529,7 +538,7 @@ function randBinCached(i) { return _binStream[i % _binStream.length]; }
 /* ---------- 攥拳 / 张开 的连续置信度（0~1）----------
    用连续打分替代布尔判定，便于滞回与可视化 */
 function clenchScore(lm) {
-  const palm = lm[9], r = scaleOf(lm);
+  const palm = palmOf(lm), r = scaleOf(lm);
   const TIPS = [4, 8, 12, 16, 20];
   // ① 每个指尖到掌心的平均距离（越小越像攥拳）
   let nearSum = 0;
@@ -598,28 +607,29 @@ function confirmMode(next) {
    食指(8)与拇指(4)用来构成框角，中指(12)/无名指(16)/小指(20)必须收拢 */
 /* 严格收拢判定：三指必须"真的弯下去"，光靠近不够 */
 function curlScore(lm) {
-  const palm = lm[9], r = scaleOf(lm);
+  const palm = palmOf(lm), r = scaleOf(lm);
   const FINGERS = [[12, 10], [16, 14], [20, 18]];   // [指尖, 第二指节]
   const scores = FINGERS.map(([tip, pip]) => {
-    const dTip = d2(lm[tip], palm) / r;
-    const dPip = d2(lm[pip], palm) / r;
-    // ① 指尖要足够靠近掌心（收紧了）
-    const near = clamp01((1.55 - dTip) / 0.55);
-    // ② 指尖必须比第二指节更靠近掌心（说明真的弯曲，而非整根手指伸着）
-    const bent = clamp01((dPip - dTip) / (dPip * 0.42 + 1e-6));
-    return near * 0.55 + bent * 0.45;
+    const dTip = d3(lm[tip], palm) / r;
+    const dPip = d3(lm[pip], palm) / r;
+    // ① 指尖靠近掌心（放宽：阈值放到 2.0，正常收拢约 1.0~1.4）
+    const near = clamp01((2.05 - dTip) / 0.85);
+    // ② 指尖比第二指节更靠近掌心 = 真的弯曲
+    const bent = clamp01((dPip - dTip) / (dPip * 0.30 + 1e-6));
+    return near * 0.5 + bent * 0.5;
   });
-  // 用最小值主导：任何一指没收紧都会明显拉低
+  // 最小值主导但不极端，兼顾"都要收紧"和容错
   scores.sort((a, b) => a - b);
   const worst = scores[0], avg = (scores[0] + scores[1] + scores[2]) / 3;
-  return clamp01(worst * 0.65 + avg * 0.35);
+  return clamp01(worst * 0.55 + avg * 0.45);
 }
 /* 食指与拇指必须"明显伸开"才允许四边形 */
 function indexThumbClearlyOpen(lm) {
-  const palm = lm[9], r = scaleOf(lm);
-  return d2(lm[8], palm) / r > 1.55 && d2(lm[4], palm) / r > 1.25;
+  const palm = palmOf(lm), r = scaleOf(lm);
+  // 用 3D 距离；正常伸直食指约 2.0~2.6，拇指约 1.2~1.8
+  return d3(lm[8], palm) / r > 1.30 && d3(lm[4], palm) / r > 0.95;
 }
-const CURL_ON = 0.70, CURL_OFF = 0.50;
+const CURL_ON = 0.58, CURL_OFF = 0.38;
 function isOthersCurled(lm) {
   const s = curlScore(lm);
   lm.__curl = s;
@@ -1379,8 +1389,8 @@ function loop() {
       ' 开指 ' + lastList.map(l => (l.__open3 ? 'Y' : 'N')).join(' ') +
       ' 伸开 ' + lastList.map(l => {
         if (!l[8]) return '-';
-        const rr = scaleOf(l);
-        return (d2(l[8], l[9]) / rr).toFixed(2) + '/' + (d2(l[4], l[9]) / rr).toFixed(2);
+        const rr = scaleOf(l), pp = palmOf(l);
+        return (d3(l[8], pp) / rr).toFixed(2) + '/' + (d3(l[4], pp) / rr).toFixed(2);
       }).join(' ') + '\n' +
       '↑ 绿=达标(握≥' + CLENCH_ON + ' 张≥' + SPREAD_ON + ' 收拢≥' + CURL_ON + ')\n' +
       '四点 ' + q + '\n' +
