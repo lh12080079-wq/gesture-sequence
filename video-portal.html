@@ -157,7 +157,7 @@
 
 <div id="grid"></div><div id="scan"></div><div id="noise"></div><div id="vign"></div>
 
-<div id="hudToggle" class="tg tg-tl">◈</div>
+<button id="hudToggle" class="tg tg-tl" title="状态" aria-label="状态">◈</button>
 <div id="hud" class="panel collapsed">
   <h1>VIDEO PORTAL</h1>
   <div class="sub">HAND-FRAMED HOLE / CAMERA + VIDEO</div>
@@ -166,19 +166,16 @@
   <div id="loadState">未载入视频</div>
 </div>
 
-<div id="binToggle" class="tg tg-tr">01</div>
+<button id="binToggle" class="tg tg-tr" title="数据流" aria-label="数据流">01</button>
 <div id="bin" class="panel collapsed"><span class="lbl">DATA STREAM</span><span id="binText">0101011010010110</span></div>
 
-<div id="binToggle" class="tg tg-tr">01</div>
-<div id="bin" class="panel collapsed"><span class="lbl">DATA STREAM</span><span id="binText">0101011010010110</span></div>
-
-<div id="fullbarToggle" class="tg tg-tc">▮</div>
+<button id="fullbarToggle" class="tg tg-tc" title="进度" aria-label="进度">▮</button>
 <div id="fullbar" class="panel collapsed">
   <div class="lbl">FULLSCREEN PROGRESS (65%)</div>
   <div class="track"><div class="fill2"></div></div>
 </div>
 
-<div id="tunerToggle" class="tg tg-tr2">⚙</div>
+<button id="tunerToggle" class="tg tg-tr2" title="调节" aria-label="调节">⚙</button>
 <div id="tuner" class="panel collapsed">
   <div class="row2">
     <span class="lab">触发阈值</span>
@@ -192,11 +189,11 @@
   <input id="fw" type="range" min="0" max="24" step="1" value="8">
 </div>
 
-<div id="diagToggle" class="tg tg-bl">▤</div>
+<button id="diagToggle" class="tg tg-bl" title="诊断" aria-label="诊断">▤</button>
 <div id="diag" class="panel collapsed"></div>
 <div id="hint"></div>
 
-<div id="guideToggle" class="tg tg-br">?</div>
+<button id="guideToggle" class="tg tg-br" title="说明" aria-label="说明">?</button>
 <div id="guide" class="panel collapsed">
   <b>玩法</b><br>
   <span class="p">扇形滤镜</span>：一手攥拳·一手张开五指<br>
