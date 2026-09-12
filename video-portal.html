@@ -599,7 +599,7 @@ let fanHoldFrames = 0;   // 扇形保持帧数，容忍短暂丢失
 const scoreHist = { clench: [[], []], spread: [[], []], curl: [[], []] };
 function smoothScore(kind, idx, v) {
   const q = scoreHist[kind][idx] || (scoreHist[kind][idx] = []);
-  q.push(v); if (q.length > 6) q.shift();
+  q.push(v); if (q.length > 4) q.shift();
   let s = 0; for (const x of q) s += x;
   return s / q.length;
 }
@@ -680,10 +680,10 @@ function clenchedPoint(lm) {
 
 /* 四种滤镜 */
 const FILTERS = [
-  { name: 'CYAN EDGE',    f: 'hue-rotate(160deg) saturate(2.2) contrast(1.35) brightness(1.1)' },
-  { name: 'NEON PINK',    f: 'hue-rotate(310deg) saturate(2.6) contrast(1.3) brightness(1.05)' },
-  { name: 'THERMAL',      f: 'invert(1) hue-rotate(180deg) saturate(3) contrast(1.5) brightness(1.15)' },
-  { name: 'GLITCH VIOLET',f: 'hue-rotate(255deg) saturate(2.8) contrast(1.6) brightness(.95)' }
+  { name: 'CYAN EDGE',    f: 'hue-rotate(160deg) saturate(4.5) contrast(2.0) brightness(1.25)' },
+  { name: 'NEON PINK',    f: 'hue-rotate(310deg) saturate(5.0) contrast(1.9) brightness(1.2)' },
+  { name: 'THERMAL',      f: 'invert(1) hue-rotate(180deg) saturate(6.0) contrast(2.2) brightness(1.3)' },
+  { name: 'GLITCH VIOLET',f: 'hue-rotate(255deg) saturate(5.5) contrast(2.3) brightness(1.1)' }
 ];
 
 let fanTriangles = [];   // 当前四个三角形的屏幕坐标
@@ -772,19 +772,30 @@ function drawFanUI(apex, tips, t) {
 
 /* 在遮罩层为三角形区域施加滤镜（先挖洞透出视频，再叠滤镜色） */
 function renderFanFilters() {
-  if (!fanTriangles.length) return;
-  const W = maskCanvas.width, H = maskCanvas.height;
-  mctx.save();
+  if (!fanTriangles.length || bgVideo.readyState < 2) return;
+  const W = vlayer.width, H = vlayer.height;
   for (let i = 0; i < fanTriangles.length; i++) {
     const [A, B, C] = fanTriangles[i];
-    mctx.beginPath();
-    mctx.moveTo(A.x, A.y); mctx.lineTo(B.x, B.y); mctx.lineTo(C.x, C.y);
-    mctx.closePath();
+    vctx.save();
+    // 只在该三角形区域内处理
+    vctx.beginPath();
+    vctx.moveTo(A.x, A.y); vctx.lineTo(B.x, B.y); vctx.lineTo(C.x, C.y);
+    vctx.closePath();
+    vctx.clip();
+    // 真正把滤镜应用到视频画面上
+    vctx.filter = FILTERS[i].f;
+    vctx.globalAlpha = 0.92;
+    vctx.drawImage(bgVideo, 0, 0, W, H);
+    vctx.filter = 'none';
+    vctx.globalAlpha = 1;
+    // 叠加一层色调，让滤镜感更明显
     const col = ['rgba(57,230,255,', 'rgba(255,92,200,', 'rgba(255,180,60,', 'rgba(170,90,255,'][i];
-    mctx.fillStyle = col + '0.20)';
-    mctx.fill();
+    vctx.globalCompositeOperation = 'overlay';
+    vctx.fillStyle = col + '0.30)';
+    vctx.fillRect(0, 0, W, H);
+    vctx.globalCompositeOperation = 'source-over';
+    vctx.restore();
   }
-  mctx.restore();
 }
 
 /* ---------- 用两手的食指与拇指构造矩形 ---------- */
@@ -1008,8 +1019,7 @@ function renderMask() {
     mctx.restore();
   }
 
-  // 扇形模式：在三角形区域叠加滤镜色调
-  if (mode === 'fan' && fanTriangles.length) renderFanFilters();
+
 
   // 全屏：摄像头层整体淡出，视频层完全显露
   if (fullMix > 0.001) {
@@ -1076,7 +1086,8 @@ function glitch() {
    One Euro Filter：低速时强平滑（消除抖动），高速时弱平滑（保持跟手）
    这是实时手势追踪的标准做法，比简单 lerp 效果好得多 */
 class OneEuro {
-  constructor(minCutoff = 1.2, beta = 0.008, dCutoff = 1.0) {
+  // beta 越大 = 手快时跟随越紧（降低延迟）；minCutoff 越大 = 整体越跟手
+  constructor(minCutoff = 2.6, beta = 0.045, dCutoff = 1.0) {
     this.minCutoff = minCutoff; this.beta = beta; this.dCutoff = dCutoff;
     this.xPrev = null; this.dxPrev = 0; this.tPrev = null;
   }
@@ -1104,7 +1115,7 @@ class OneEuro {
 const filters = [];
 function getFilter(handIdx, lmIdx, axis) {
   const k = handIdx * 21 * 3 + lmIdx * 3 + axis;
-  if (!filters[k]) filters[k] = new OneEuro(1.15, 0.006, 1.0);
+  if (!filters[k]) filters[k] = new OneEuro(2.6, 0.045, 1.0);
   return filters[k];
 }
 /* 对整帧关键点做滤波 */
@@ -1216,8 +1227,8 @@ function onHands(list) {
     // 平滑
     if (!smoothRect) smoothRect = { cx: g.cx, cy: g.cy, area: g.area, pts: g.pts.map(q => ({ x: q.x, y: q.y })) };
     else {
-      // 更低系数 = 更顺滑的跟随（配合关键点滤波，整体手感连贯）
-      const k = 0.22;
+      // 提高系数以减少滞后；抖动已由 One Euro 滤波处理
+      const k = 0.45;
       smoothRect.cx += (g.cx - smoothRect.cx) * k;
       smoothRect.cy += (g.cy - smoothRect.cy) * k;
       smoothRect.area += (g.area - smoothRect.area) * k;
@@ -1364,7 +1375,7 @@ async function start() {
       try { raw = landmarker.detectForVideo(cam, now).landmarks || []; } catch (e) { return; }
       // 手部丢帧保持：单帧丢手时沿用上一帧，避免特效闪断
       let list;
-      if (raw.length === 0 && holdList.length && (now - holdAt) < 220) {
+      if (raw.length === 0 && holdList.length && (now - holdAt) < 140) {
         list = holdList;
       } else {
         list = smoothLandmarks(raw, now);
@@ -1490,6 +1501,8 @@ function loop() {
   } else {
     renderMask();
     drawVideoFull();
+    // 滤镜必须在视频层绘制之后应用，否则会被覆盖
+    if (mode === 'fan' && fanTriangles.length) renderFanFilters();
     drawSkeleton(lastList, mode === 'point' && !liveQuad);
     if (mode === 'fan' && fanApex && fanTips.length === 5) {
       drawFanUI(fanApex, fanTips, performance.now());
