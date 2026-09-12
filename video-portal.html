@@ -72,6 +72,23 @@
     box-shadow:0 0 22px rgba(57,230,255,.5);border-color:rgba(255,92,200,.6)}
   button:disabled{opacity:.45;cursor:default}
 
+  #tuner{position:fixed;z-index:10;right:20px;top:calc(18px + env(safe-area-inset-top));
+    width:236px;background:rgba(6,14,28,.66);border:1px solid rgba(57,230,255,.26);
+    border-radius:11px;padding:12px 15px;backdrop-filter:blur(12px);
+    box-shadow:0 0 24px rgba(57,230,255,.12)}
+  #tuner .row2{display:flex;justify-content:space-between;font-size:10px;letter-spacing:.12em;color:#8fc4e8;margin:6px 0 4px}
+  #tuner .val{color:#39e6ff;text-shadow:0 0 10px rgba(57,230,255,.7)}
+  #tuner input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:4px;
+    border-radius:3px;background:linear-gradient(90deg,#39e6ff,#b14bff,#ff3fa0);outline:none;margin-bottom:8px}
+  #tuner input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;
+    border-radius:50%;background:#eafcff;border:2px solid #39e6ff;cursor:pointer;
+    box-shadow:0 0 14px rgba(57,230,255,.95)}
+  #tuner input[type=range]::-moz-range-thumb{width:15px;height:15px;border-radius:50%;
+    background:#eafcff;border:2px solid #39e6ff;cursor:pointer}
+  #glitch{position:fixed;inset:0;z-index:7;pointer-events:none;opacity:0;
+    background:repeating-linear-gradient(180deg,rgba(255,60,160,.16) 0 2px,transparent 2px 5px);
+    mix-blend-mode:screen;transition:opacity .12s}
+  #hex{position:fixed;inset:0;z-index:6;pointer-events:none;opacity:.16}
   #guide{position:fixed;z-index:9;right:20px;bottom:calc(18px + env(safe-area-inset-bottom));
     width:252px;font-size:10px;line-height:1.9;color:#8fc4e8;
     background:rgba(6,14,28,.62);border:1px solid rgba(57,230,255,.24);
@@ -113,20 +130,34 @@
 </div>
 
 <div id="fullbar">
-  <div class="lbl">FULLSCREEN PROGRESS</div>
+  <div class="lbl">FULLSCREEN PROGRESS (80%)</div>
   <div class="track"><div class="fill2"></div></div>
+</div>
+
+<div id="tuner">
+  <div class="row2">
+    <span class="lab">触发阈值</span>
+    <span class="val" id="thVal">80%</span>
+  </div>
+  <input id="th" type="range" min="30" max="95" step="1" value="80">
+  <div class="row2">
+    <span class="lab">口子羽化</span>
+    <span class="val" id="fwVal">18</span>
+  </div>
+  <input id="fw" type="range" min="0" max="40" step="1" value="18">
 </div>
 
 <div id="hint"></div>
 
 <div id="guide">
   <b>玩法</b><br>
-  <span class="k">一只手</span> 五指并拢 → 视作一个点<br>
+  <span class="k">一只手</span> 握拳 / 五指并拢 → 视作一个点<br>
   <span class="k">另一只手</span> 五指 → 与点连线<br>
   <span class="p">双手食指+拇指</span> → 构成矩形<br>
   <span class="p">矩形</span> → 像漏洞一样看到后台视频<br>
-  <span class="k">撑满 80%</span> → 视频全屏接管<br>
-  <span class="p">握拳</span> → 退出全屏 / 收起口子<br>
+  <span class="p">矩形</span> 内实时透出视频画面<br>
+  <span class="k">撑满阈值</span> → 视频全屏接管（可调）<br>
+  <span class="k">阈值</span> 右上角滑杆实时调节<br>
   <span class="k">先载入</span> 你自己的视频文件
 </div>
 
@@ -134,7 +165,6 @@
   <button id="pick">载入我的视频</button>
   <button id="start">启用摄像头</button>
   <button id="demoVideo">示例视频</button>
-  <button id="exitFull" style="display:none">退出全屏</button>
 </div>
 <input id="file" type="file" accept="video/*" style="display:none">
 
@@ -174,9 +204,9 @@ const BONES = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,
 let mode = 'idle';            // idle | point | rect | full
 let reveal = 0, targetReveal = 0;   // 0..1 洞的张开度
 let fullMix = 0, targetFull = 0;    // 0..1 全屏混合
-let locked = false;                 // 全屏后锁定，停止手势交互
-let lockedAt = 0;
 let lastList = [];
+let FULL_THRESHOLD = 0.80;          // 可调：矩形占屏比例阈值（全屏触发）
+let isFull = false;                 // 是否已进入全屏（带滞回）
 let rect = { x: 0, y: 0, w: 0, h: 0, cx: 0, cy: 0, ang: 0 };
 let smoothRect = null;
 let pointPos = null;           // 单点（握指手）
@@ -195,6 +225,8 @@ addEventListener('resize', resizeSkel);
 const d2 = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const scaleOf = lm => d2(lm[0], lm[9]) || 0.1;
 function isPinchedPoint(lm) {
+  // 握拳也视作一个点
+  if (isFist(lm)) return true;
   const r = scaleOf(lm);
   const tips = [8, 12, 16, 20];
   const palm = lm[9];
@@ -344,9 +376,9 @@ function renderMask() {
       mctx.fill();
       // 边缘羽化，让口子看起来更自然
       mctx.globalCompositeOperation = 'destination-out';
-      mctx.filter = 'blur(' + Math.round(8 + 10 * reveal) + 'px)';
+      mctx.filter = 'blur(' + Math.round(FEATHER * 0.5 + 6) + 'px)';
       mctx.globalAlpha = 0.55;
-      const fw = rw + 14, fh = rh + 14;
+      const fw = rw + FEATHER, fh = rh + FEATHER;
       mctx.beginPath();
       roundRect(mctx, -fw, -fh, fw * 2, fh * 2, rad + 10);
       mctx.fillStyle = 'rgba(0,0,0,1)';
@@ -396,23 +428,51 @@ function setState(txt, hint, cls) {
   else hintEl.classList.remove('on');
 }
 
+
+/* ---------- 赛博朋克特效层：六边形网格 ---------- */
+const hexCanvas = document.createElement('canvas');
+hexCanvas.id = 'hex'; document.body.appendChild(hexCanvas);
+const hctx = hexCanvas.getContext('2d');
+let hexT = 0;
+function drawHexGrid() {
+  const W = hexCanvas.width, H = hexCanvas.height;
+  if (!W) return;
+  hctx.clearRect(0, 0, W, H);
+  const R = 46, t = hexT += 0.006;
+  hctx.lineWidth = 1.2;
+  for (let row = -1, y = 0; y < H + R; row++, y += R * 1.5) {
+    for (let col = -1, x = 0; x < W + R; col++, x += R * Math.sqrt(3)) {
+      const ox = x + (row % 2 ? R * Math.sqrt(3) / 2 : 0);
+      const pulse = 0.5 + 0.5 * Math.sin(t * 3 + (row + col) * 0.6);
+      hctx.strokeStyle = 'rgba(57,230,255,' + (0.05 + pulse * 0.11) + ')';
+      hctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const a = Math.PI / 6 + i * Math.PI / 3;
+        const px = ox + Math.cos(a) * R, py = y + Math.sin(a) * R;
+        i ? hctx.lineTo(px, py) : hctx.moveTo(px, py);
+      }
+      hctx.closePath(); hctx.stroke();
+    }
+  }
+}
+function resizeHex() {
+  hexCanvas.width = innerWidth; hexCanvas.height = innerHeight;
+}
+resizeHex();
+addEventListener('resize', resizeHex);
+
+/* ---------- 故障闪屏 ---------- */
+const glitchEl = document.createElement('div');
+glitchEl.id = 'glitch'; document.body.appendChild(glitchEl);
+function glitch() {
+  glitchEl.style.opacity = '0.5';
+  setTimeout(() => { glitchEl.style.opacity = '0'; }, 110);
+}
+
 /* ---------- 手势主逻辑 ---------- */
 function onHands(list) {
   lastList = list;
   const now = performance.now();
-  // 已全屏：只响应「握拳退出」，其余手势忽略
-  if (locked) {
-    handsEl.textContent = list.length ? 'HANDS: ' + list.length + ' / 握拳退出' : 'HANDS: 全屏锁定';
-    if (list.length && list.some(isFist)) {
-      locked = false; lockedAt = 0;
-      targetFull = 0; targetReveal = 0;
-      fullMix = 0; reveal = 0;
-      smoothRect = null;
-      setState('READY / 已退出全屏', '握拳退出成功 — 再比矩形可重新放大', 'ok');
-      return;
-    }
-    return;
-  }
   handsEl.textContent = 'HANDS: ' + list.length;
   if (!list.length) {
     if (now - lastSeen > 350) {
@@ -461,13 +521,14 @@ function onHands(list) {
     const area = (rect.w * rect.h) / (skel.width * skel.height);
     targetReveal = 1;   // 口子始终完全透出视频
     // 撑满屏幕面积的 80% 时进入全屏，并锁定（不再响应手势）
-    if (area >= 0.80 && !locked) {
-      locked = true; lockedAt = now;
-      targetFull = 1; targetReveal = 1;
-      setState('FULL / 全屏播放中', '握拳即可退出全屏，手放下不影响播放', 'full');
+    if (area >= FULL_THRESHOLD) {
+      if (!isFull) { isFull = true; glitch(); setState('FULL / 全屏播放', '全屏中 — 双手分开即可退出', 'full'); }
+      targetFull = 1;
+    } else if (area < FULL_THRESHOLD * 0.75) {
+      if (isFull) { isFull = false; glitch(); setState('RECT / 抠洞', '食指与拇指构成矩形 — 透过它看视频', 'live'); }
+      targetFull = 0;
     }
 
-    if (locked) setState('FULL / 全屏播放中', '握拳即可退出全屏，手放下不影响播放', 'full');
     else setState('RECT / 抠洞', '食指与拇指构成矩形 — 透过它看视频', 'live');
     return;
   }
@@ -537,9 +598,8 @@ async function start() {
       prev = now;
       let list = [];
       try { list = landmarker.detectForVideo(cam, now).landmarks || []; } catch (e) { return; }
-      // 始终调用 onHands：内部自行判断是否响应（全屏锁定时只处理握拳退出）
       onHands(list);
-      if (!locked) drawSkeleton(list, mode === 'point');
+      drawSkeleton(list, mode === 'point');
       fps++;
       if (now - fAt > 1000) { $('#fps').textContent = 'FPS ' + fps; fps = 0; fAt = now; }
     };
@@ -585,13 +645,19 @@ $('#demoVideo').addEventListener('click', () => {
 
 $('#start').addEventListener('click', start);
 
-$('#exitFull').addEventListener('click', () => {
-  locked = false; lockedAt = 0;
-  targetFull = 0; targetReveal = 0;
-  fullMix = 0; reveal = 0;
-  $('#exitFull').style.display = 'none';
-  setState('READY / 就绪', '双手食指+拇指比出矩形，撑满镜头 80% 后全屏播放', 'ok');
+/* ---------- 可调参数 ---------- */
+let FEATHER = 18;
+$('#th').addEventListener('input', e => {
+  FULL_THRESHOLD = Number(e.target.value) / 100;
+  $('#thVal').textContent = e.target.value + '%';
+  $('#fullbar').querySelector('.lbl').textContent = 'FULLSCREEN PROGRESS (' + e.target.value + '%)';
 });
+$('#fw').addEventListener('input', e => {
+  FEATHER = Number(e.target.value);
+  $('#fwVal').textContent = e.target.value;
+});
+
+
 
 /* ---------- 渲染循环 ---------- */
 function loop() {
@@ -601,15 +667,10 @@ function loop() {
   fullMix = lerp(fullMix, targetFull, 0.08);
   $('#fullbar').style.opacity = fullMix > 0.05 ? 1 : 0;
   $('#fullbar').querySelector('.fill2').style.width = Math.round(fullMix * 100) + '%';
-  $('#fullbar').querySelector('.lbl').textContent = locked ? 'FULLSCREEN / 握拳退出' : 'FULLSCREEN PROGRESS (80%)';
-  const ex = $('#exitFull');
-  if (ex) ex.style.display = 'none';   // 改为纯手势退出，按钮隐藏
+  $('#fullbar').querySelector('.lbl').textContent = 'FULLSCREEN PROGRESS (' + Math.round(FULL_THRESHOLD * 100) + '%)';
   renderMask();
-  if (locked) {
-    if (skel.width) sctx.clearRect(0, 0, skel.width, skel.height);
-  } else {
-    drawSkeleton(lastList, mode === 'point');
-  }
+  drawSkeleton(lastList, mode === 'point');
+  drawHexGrid();
 }
 loop();
 resizeSkel();
