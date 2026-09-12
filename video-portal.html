@@ -1828,17 +1828,23 @@ $('#file').addEventListener('change', e => {
   if (!f) return;
   const url = URL.createObjectURL(f);
   // 先探测编码格式，便于诊断
+  // 清掉上一次的错误提示
+  if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
   probeVideoCodec(f).then(pi => {
     window.__videoInfo = pi;
-    const bad = /H\.265|HEVC|AV1|未识别/.test(pi.codec);
+    const bad = /H\.265|HEVC|AV1/.test(pi.codec);
     if (bad) {
-      showErr('检测到视频编码：' + pi.codec + '（' + pi.container + '）\n\n' +
-        '浏览器可能无法解码这个编码，这正是画面黑屏的原因。\n\n' +
-        '请转码为 H.264 编码的 MP4（建议同时降到 1080p）。');
+      showErr('当前文件编码：' + pi.codec + '（' + (pi.container || '?') + '）\n\n' +
+        '浏览器不支持这个编码，所以只出声音不出画面。\n\n' +
+        '必须重新编码为 H.264（不是改后缀名）。');
     }
+    // 同时把结果写进状态栏，便于随时查看
     const ls = document.getElementById('loadState');
-    if (ls) ls.dataset.codec = pi.codec;
-  }).catch(() => {});
+    if (ls) ls.textContent = '文件编码：' + pi.codec + ' · 容器：' + pi.container + ' · ' + pi.size;
+  }).catch(() => {
+    const ls = document.getElementById('loadState');
+    if (ls) ls.textContent = '无法读取文件头（可能不是标准视频文件）';
+  });
   // 载入新视频前：彻底重置状态，避免沿用旧视频的绘制标记导致黑屏
   try { bgVideo.pause(); } catch (e) {}
   bgVideo.removeAttribute('src');
@@ -2013,6 +2019,8 @@ function loop() {
       : '<span class="bad2">未就绪 rs=' + bgVideo.readyState + vErr + '</span>';
     diagEl.innerHTML =
       '摄像头 ' + camTxt + ' | 视频 ' + vidTxt + '\n' +
+      (window.__videoInfo ? '文件 ' + window.__videoInfo.name + ' ' + window.__videoInfo.size +
+        ' 编码 ' + window.__videoInfo.codec + ' 容器 ' + window.__videoInfo.container + '\n' : '') +
       '画布 ' + maskCanvas.width + 'x' + maskCanvas.height +
       ' | 性能档 L' + PERF.level + ' 间隔' + PERF.detectMs + 'ms' +
       (PERF.fpsAvg ? ' 均帧' + PERF.fpsAvg.toFixed(0) : '') + '\n' +
