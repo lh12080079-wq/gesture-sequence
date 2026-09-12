@@ -591,8 +591,8 @@ function tagNum(v, need) {
 }
 
 /* 滞回：进入需 ≥ ON，退出需 < OFF，避免临界抖动 */
-const CLENCH_ON = 0.66, CLENCH_OFF = 0.45;
-const SPREAD_ON = 0.55, SPREAD_OFF = 0.35;
+const CLENCH_ON = 0.52, CLENCH_OFF = 0.32;
+const SPREAD_ON = 0.45, SPREAD_OFF = 0.28;
 let clenchLatched = false, spreadLatched = false;
 let fanHoldFrames = 0;   // 扇形保持帧数，容忍短暂丢失
 /* 分数的时间平滑：历史队列取平均，避免单帧波动 */
@@ -772,20 +772,32 @@ const fxCanvas = document.createElement('canvas');
 const fxctx = fxCanvas.getContext('2d');
 
 function renderFanFilters() {
-  if (!fanTriangles.length || bgVideo.readyState < 2) return;
+  if (!fanTriangles.length) return;
   const W = vlayer.width, H = vlayer.height;
+  if (!W || !H) return;
   if (fxCanvas.width !== W || fxCanvas.height !== H) { fxCanvas.width = W; fxCanvas.height = H; }
+  const hasVideo = bgVideo.readyState >= 2 && bgVideo.videoWidth;
+  const hasCam = camOn && cam.videoWidth;
 
   for (let i = 0; i < fanTriangles.length; i++) {
     const [A, B, C] = fanTriangles[i];
 
-    // 1) 在离屏画布上生成"带该滤镜的整帧视频"
+    // 1) 在离屏画布上生成"带该滤镜的整帧画面"（视频优先，其次摄像头）
     fxctx.setTransform(1, 0, 0, 1, 0, 0);
     fxctx.globalAlpha = 1;
     fxctx.globalCompositeOperation = 'source-over';
+    fxctx.filter = 'none';
     fxctx.clearRect(0, 0, W, H);
     fxctx.filter = FILTERS[i].f;
-    fxctx.drawImage(bgVideo, 0, 0, W, H);
+    if (hasVideo) {
+      fxctx.drawImage(bgVideo, 0, 0, W, H);
+    } else if (hasCam) {
+      fxctx.save(); fxctx.translate(W, 0); fxctx.scale(-1, 1);
+      fxctx.drawImage(cam, 0, 0, W, H);
+      fxctx.restore();
+    } else {
+      fxctx.fillStyle = '#0a1626'; fxctx.fillRect(0, 0, W, H);
+    }
     fxctx.filter = 'none';
 
     // 2) 用三角形裁剪，把滤镜帧贴到视频层
@@ -1575,6 +1587,22 @@ function loop() {
 loop();
 resizeSkel();
 diagEl = document.getElementById('diag');
+
+/* 若用户未主动载入视频，自动载入示例视频，保证滤镜/抠洞有画面可用 */
+setTimeout(() => {
+  if (!hasUserVideo) {
+    bgVideo.src = 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
+    bgVideo.loop = true; bgVideo.muted = true;
+    bgVideo.addEventListener('loadeddata', () => {
+      try { bgVideo.currentTime = 0; } catch (e) {}
+      bgVideo.pause();
+      hasUserVideo = true; videoStarted = false;
+      $('#loadState').textContent = '已自动载入示例视频（点“载入我的视频”可替换）';
+    }, { once: true });
+    bgVideo.load();
+  }
+}, 800);
+
 window.__ready = true;
 if (bootEl) bootEl.style.display = 'none';
 </script>
