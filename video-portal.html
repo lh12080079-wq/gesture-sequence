@@ -1300,7 +1300,7 @@ function smoothLandmarks(list, t) {
 
 /* ---------- 稳定性：状态锁 + 丢帧计数 ---------- */
 /* 每种模式的最小保持时间（ms），防止快速切换造成闪烁 */
-const MIN_HOLD = { fan: 400, rect: 350, point: 250, idle: 120 };
+const MIN_HOLD = { fan: 150, rect: 150, point: 120, idle: 60 };
 let modeSince = 0;          // 当前模式进入时间
 let missCount = 0;          // 连续未命中期望模式的帧数
 
@@ -1329,7 +1329,7 @@ function onHands(list) {
   if (!list.length) {
     // 丢帧容忍：短暂丢手不清状态，避免画面闪断
     missCount++;
-    if (missCount > 12 && now - lastSeen > 400) {
+    if (missCount > 4 && now - lastSeen > 150) {
       enterMode('idle');
       targetReveal = 0; reveal = 0;
       targetFull = 0; fullMix = 0;
@@ -1379,13 +1379,13 @@ function onHands(list) {
       fanLastTri = fanTriangles;
       // 已处于扇形时：直接维持，不再要求重新确认（避免转动时断续）
       if (mode === 'fan') {
-        fanHoldFrames = 45;
+        fanHoldFrames = 12;
         setState('FAN / 4 三角形滤镜', '攥拳成点 · 另一手五指张开 → 4 个滤镜三角形', 'live');
         return;
       }
       if (confirmMode('fan') && canSwitch('fan')) {
         enterMode('fan');
-        fanHoldFrames = 45;
+        fanHoldFrames = 12;
         pointPos = null; smoothRect = null; liveQuad = null;
         targetReveal = 0; targetFull = 0;
         setState('FAN / 4 三角形滤镜', '攥拳成点 · 另一手五指张开 → 4 个滤镜三角形', 'live');
@@ -1862,7 +1862,7 @@ $('#fw').addEventListener('input', e => {
 function loop() {
   requestAnimationFrame(loop);
   const lerp = (a, b, k) => a + (b - a) * k;
-  reveal = lerp(reveal, targetReveal, 0.18);
+  reveal = lerp(reveal, targetReveal, targetReveal === 0 ? 0.35 : 0.18);   // 收起更快
   fullMix = lerp(fullMix, targetFull, 0.08);
 
   /* 撑满动画：从四边形平滑扩张到全屏（缓动曲线，丝滑不突兀） */
@@ -1903,7 +1903,7 @@ function loop() {
     // 滤镜必须在视频层绘制之后应用，否则会被覆盖
     if (mode === 'fan' && fanTriangles.length) renderFanFilters();
     else if (flayer.width) {
-      fanAlpha += (0 - fanAlpha) * 0.25;
+      fanAlpha += (0 - fanAlpha) * 0.45;   // 更快淡出
       if (fanAlpha < 0.01) { fanAlpha = 0; fctx.clearRect(0, 0, flayer.width, flayer.height); }
     }
     drawSkeleton(lastList, mode === 'point' && !liveQuad);
