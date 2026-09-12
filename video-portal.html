@@ -176,6 +176,7 @@ let reveal = 0, targetReveal = 0;   // 0..1 洞的张开度
 let fullMix = 0, targetFull = 0;    // 0..1 全屏混合
 let locked = false;                 // 全屏后锁定，停止手势交互
 let lockedAt = 0;
+let lastList = [];
 let rect = { x: 0, y: 0, w: 0, h: 0, cx: 0, cy: 0, ang: 0 };
 let smoothRect = null;
 let pointPos = null;           // 单点（握指手）
@@ -397,10 +398,11 @@ function setState(txt, hint, cls) {
 
 /* ---------- 手势主逻辑 ---------- */
 function onHands(list) {
+  lastList = list;
   const now = performance.now();
   // 已全屏：只响应「握拳退出」，其余手势忽略
   if (locked) {
-    handsEl.textContent = 'HANDS: 全屏锁定';
+    handsEl.textContent = list.length ? 'HANDS: ' + list.length + ' / 握拳退出' : 'HANDS: 全屏锁定';
     if (list.length && list.some(isFist)) {
       locked = false; lockedAt = 0;
       targetFull = 0; targetReveal = 0;
@@ -535,10 +537,9 @@ async function start() {
       prev = now;
       let list = [];
       try { list = landmarker.detectForVideo(cam, now).landmarks || []; } catch (e) { return; }
-      if (!locked) {
-        onHands(list);
-        drawSkeleton(list, mode === 'point');
-      }
+      // 始终调用 onHands：内部自行判断是否响应（全屏锁定时只处理握拳退出）
+      onHands(list);
+      if (!locked) drawSkeleton(list, mode === 'point');
       fps++;
       if (now - fAt > 1000) { $('#fps').textContent = 'FPS ' + fps; fps = 0; fAt = now; }
     };
@@ -610,9 +611,6 @@ function loop() {
     drawSkeleton(lastList, mode === 'point');
   }
 }
-let lastList = [];
-const _onHands = onHands;
-onHands = function (list) { lastList = list; _onHands(list); };
 loop();
 resizeSkel();
 window.__ready = true;
