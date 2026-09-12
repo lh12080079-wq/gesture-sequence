@@ -125,7 +125,8 @@
   <span class="k">另一只手</span> 五指 → 与点连线<br>
   <span class="p">双手食指+拇指</span> → 构成矩形<br>
   <span class="p">矩形</span> → 像漏洞一样看到后台视频<br>
-  <span class="k">撑满镜头</span> → 视频全屏接管<br>
+  <span class="k">撑满 80%</span> → 视频全屏接管<br>
+  <span class="p">握拳</span> → 退出全屏 / 收起口子<br>
   <span class="k">先载入</span> 你自己的视频文件
 </div>
 
@@ -202,6 +203,11 @@ function isPinchedPoint(lm) {
   return near && spread < r * 1.5;
 }
 function tipsOf(lm) { return [4, 8, 12, 16, 20].map(i => lm[i]); }
+/* 握拳：五指弯曲收拢，指尖贴近掌心 */
+function isFist(lm) {
+  const palm = lm[9], r = scaleOf(lm);
+  return [8, 12, 16, 20].every(i => d2(lm[i], palm) < r * 1.2);
+}
 
 /* ---------- 骨架绘制 ---------- */
 function drawSkeleton(list, hasPoint) {
@@ -327,12 +333,23 @@ function renderMask() {
       mctx.rotate(r.ang);
       const rw = (r.w / 2 + pad), rh = (r.h / 2 + pad);
       const rad = Math.min(rw, rh) * 0.35;
-      mctx.globalAlpha = reveal;
+      // 口子：矩形内部完全透明，像撕开一道缝看到后面的视频
       mctx.beginPath();
       roundRect(mctx, -rw, -rh, rw * 2, rh * 2, rad);
+      mctx.fillStyle = 'rgba(0,0,0,1)';
       mctx.fill();
-      mctx.restore();
+      // 边缘羽化，让口子看起来更自然
+      mctx.globalCompositeOperation = 'destination-out';
+      mctx.filter = 'blur(' + Math.round(8 + 10 * reveal) + 'px)';
+      mctx.globalAlpha = 0.55;
+      const fw = rw + 14, fh = rh + 14;
+      mctx.beginPath();
+      roundRect(mctx, -fw, -fh, fw * 2, fh * 2, rad + 10);
+      mctx.fillStyle = 'rgba(0,0,0,1)';
+      mctx.fill();
+      mctx.filter = 'none';
       mctx.globalAlpha = 1;
+      mctx.restore();
     } else if (pointPos) {
       // 单点模式：柔和光晕洞
       const radius = 90 * reveal;
@@ -378,9 +395,17 @@ function setState(txt, hint, cls) {
 /* ---------- 手势主逻辑 ---------- */
 function onHands(list) {
   const now = performance.now();
-  // 已全屏：忽略一切手势，保持视频播放
+  // 已全屏：只响应「握拳退出」，其余手势忽略
   if (locked) {
-    handsEl.textContent = 'HANDS: 已停止';
+    handsEl.textContent = 'HANDS: 全屏锁定';
+    if (list.length && list.some(isFist)) {
+      locked = false; lockedAt = 0;
+      targetFull = 0; targetReveal = 0;
+      fullMix = 0; reveal = 0;
+      smoothRect = null;
+      setState('READY / 已退出全屏', '握拳退出成功 — 再比矩形可重新放大', 'ok');
+      return;
+    }
     return;
   }
   handsEl.textContent = 'HANDS: ' + list.length;
@@ -393,6 +418,14 @@ function onHands(list) {
   }
   lastSeen = now;
 
+  // 握拳：收起当前口子（未全屏时用于复位）
+  if (list.length && list.every(isFist)) {
+    mode = 'idle'; targetReveal = 0; targetFull = 0;
+    pointPos = null; smoothRect = null;
+    setState('IDLE / 已收起', '握拳 — 口子已收起', '');
+    return;
+  }
+
   // 判定哪只手是"点"：五指靠拢
   let pointIdx = -1;
   for (let i = 0; i < list.length; i++) { if (isPinchedPoint(list[i])) { pointIdx = i; break; } }
@@ -404,7 +437,7 @@ function onHands(list) {
     const c = list[pointIdx][9];
     pointPos = { x: (1 - c.x) * skel.width, y: c.y * skel.height };
     otherTips = tipsOf(list[oi]).map(p => ({ x: (1 - p.x) * skel.width, y: p.y * skel.height }));
-    targetReveal = 0.55; targetFull = 0;
+    targetReveal = 0.85; targetFull = 0;
     setState('POINT / ' + list.length + '手', '一只手握成点，另一只手五指连线', 'live');
     return;
   }
@@ -429,15 +462,15 @@ function onHands(list) {
 
     // 洞占屏比例 → 决定 reveal 与全屏
     const area = (rect.w * rect.h) / (skel.width * skel.height);
-    targetReveal = Math.min(1, area * 9);
+    targetReveal = 1;   // 口子始终完全透出视频
     // 撑满屏幕面积的 80% 时进入全屏，并锁定（不再响应手势）
     if (area >= 0.80 && !locked) {
       locked = true; lockedAt = now;
       targetFull = 1; targetReveal = 1;
-      setState('FULL / 全屏播放中', '手势交互已停止 — 点“退出全屏”返回', 'full');
+      setState('FULL / 全屏播放中', '握拳即可退出全屏，手放下不影响播放', 'full');
     }
 
-    if (locked) setState('FULL / 全屏播放中', '手势交互已停止 — 点“退出全屏”返回', 'full');
+    if (locked) setState('FULL / 全屏播放中', '握拳即可退出全屏，手放下不影响播放', 'full');
     else setState('RECT / 抠洞', '食指与拇指构成矩形 — 透过它看视频', 'live');
     return;
   }
@@ -574,7 +607,7 @@ function loop() {
   $('#fullbar').querySelector('.fill2').style.width = Math.round(fullMix * 100) + '%';
   $('#fullbar').querySelector('.lbl').textContent = locked ? 'FULLSCREEN / 手势已停止' : 'FULLSCREEN PROGRESS (80%)';
   const ex = $('#exitFull');
-  if (ex) ex.style.display = locked ? 'inline-block' : 'none';
+  if (ex) ex.style.display = 'none';   // 改为纯手势退出，按钮隐藏
   renderMask();
   if (locked) {
     if (skel.width) sctx.clearRect(0, 0, skel.width, skel.height);
