@@ -206,7 +206,10 @@ function tipsOf(lm) { return [4, 8, 12, 16, 20].map(i => lm[i]); }
 /* 握拳：五指弯曲收拢，指尖贴近掌心 */
 function isFist(lm) {
   const palm = lm[9], r = scaleOf(lm);
-  return [8, 12, 16, 20].every(i => d2(lm[i], palm) < r * 1.2);
+  // 更严格：四指指尖都要紧贴掌心，且拇指也收拢
+  const fingers = [8, 12, 16, 20].every(i => d2(lm[i], palm) < r * 0.95);
+  const thumb = d2(lm[4], palm) < r * 1.15;
+  return fingers && thumb;
 }
 
 /* ---------- 骨架绘制 ---------- */
@@ -417,14 +420,6 @@ function onHands(list) {
     return;
   }
   lastSeen = now;
-
-  // 握拳：收起当前口子（未全屏时用于复位）
-  if (list.length && list.every(isFist)) {
-    mode = 'idle'; targetReveal = 0; targetFull = 0;
-    pointPos = null; smoothRect = null;
-    setState('IDLE / 已收起', '握拳 — 口子已收起', '');
-    return;
-  }
 
   // 判定哪只手是"点"：五指靠拢
   let pointIdx = -1;
