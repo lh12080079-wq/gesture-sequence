@@ -235,18 +235,21 @@ const maskCanvas = $('#mask'), mctx = maskCanvas.getContext('2d');
 const vlayer = $('#vlayer'), vctx = vlayer.getContext('2d');
 
 /* ---------- 元素尺寸 ---------- */
+/* 统一画布尺寸：骨架 / 遮罩 / 视频层必须完全一致，
+   否则四点坐标与挖洞坐标系错位（曾因骨架固定 2x 而 mask 用 DPR 导致错位） */
+let CANVAS_W = 0, CANVAS_H = 0;
 function resizeSkel() {
-  const r = skel.getBoundingClientRect();
-  const W = Math.round(r.width * 2), H = Math.round(r.height * 2);
-  if (skel.width !== W || skel.height !== H) { skel.width = W; skel.height = H; }
-  // 遮罩画布必须与视口一致，否则挖洞无效
   const dpr = Math.min(devicePixelRatio || 1, 2);
-  const mw = Math.round(innerWidth * dpr), mh = Math.round(innerHeight * dpr);
-  if (maskCanvas.width !== mw || maskCanvas.height !== mh) {
-    maskCanvas.width = mw; maskCanvas.height = mh;
+  CANVAS_W = Math.round(innerWidth * dpr);
+  CANVAS_H = Math.round(innerHeight * dpr);
+  if (skel.width !== CANVAS_W || skel.height !== CANVAS_H) {
+    skel.width = CANVAS_W; skel.height = CANVAS_H;
   }
-  if (vlayer && (vlayer.width !== mw || vlayer.height !== mh)) {
-    vlayer.width = mw; vlayer.height = mh;
+  if (maskCanvas.width !== CANVAS_W || maskCanvas.height !== CANVAS_H) {
+    maskCanvas.width = CANVAS_W; maskCanvas.height = CANVAS_H;
+  }
+  if (vlayer && (vlayer.width !== CANVAS_W || vlayer.height !== CANVAS_H)) {
+    vlayer.width = CANVAS_W; vlayer.height = CANVAS_H;
   }
 }
 addEventListener('resize', resizeSkel);
@@ -303,7 +306,7 @@ function drawSkeleton(list, hasPoint) {
   resizeSkel();
   sctx.clearRect(0, 0, skel.width, skel.height);
   if (!list.length) return;
-  const pt = p => ({ x: (1 - p.x) * skel.width, y: p.y * skel.height });
+  const pt = p => ({ x: (1 - p.x) * CANVAS_W, y: p.y * CANVAS_H });
   sctx.lineCap = 'round';
   list.forEach((lm, idx) => {
     const isPointHand = hasPoint && idx === 0;
@@ -389,7 +392,7 @@ function drawSkeleton(list, hasPoint) {
 /* ---------- 用两手的食指与拇指构造矩形 ---------- */
 function projectRect(a, b) {
   // 左手食指→右手食指 与 左手拇指→右手拇指 形成四边形
-  const toPx = p => ({ x: (1 - p.x) * skel.width, y: p.y * skel.height });
+  const toPx = p => ({ x: (1 - p.x) * CANVAS_W, y: p.y * CANVAS_H });
   return [toPx(a[8]), toPx(b[8]), toPx(b[4]), toPx(a[4])];
 }
 function computeRectGeo(a, b) {
@@ -692,7 +695,7 @@ function onHands(list) {
     // 洞占屏比例 → 决定 reveal 与全屏
     liveQuad = smoothRect.pts;
     // 用平滑后的面积，避免抖动导致阈值判定不稳
-    const area = smoothRect.area / (skel.width * skel.height);
+    const area = smoothRect.area / (CANVAS_W * CANVAS_H);
     targetReveal = 1;   // 口子始终完全透出视频
     lastArea = area;
     if (!isFull) {
@@ -712,7 +715,7 @@ function onHands(list) {
   if (list.length === 1 && isPinchedPoint(list[0])) {
     mode = 'point';
     const c = list[0][9];
-    pointPos = { x: (1 - c.x) * skel.width, y: c.y * skel.height };
+    pointPos = { x: (1 - c.x) * CANVAS_W, y: c.y * CANVAS_H };
     otherTips = [];
     targetReveal = 0.7; targetFull = 0;
     setState('POINT / 单手', '一只手握成点 — 另一只手放进来可构成四边形', 'live');
@@ -723,7 +726,7 @@ function onHands(list) {
   // 单手：回到光点
   mode = 'point';
   const c = list[0][9];
-  pointPos = { x: (1 - c.x) * skel.width, y: c.y * skel.height };
+  pointPos = { x: (1 - c.x) * CANVAS_W, y: c.y * CANVAS_H };
   targetReveal = 0.35; targetFull = 0;
   setState('SINGLE / 单手', '把另一只手放进来构成矩形', '');
 }
