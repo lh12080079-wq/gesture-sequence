@@ -142,9 +142,9 @@
   <input id="th" type="range" min="30" max="95" step="1" value="80">
   <div class="row2">
     <span class="lab">口子羽化</span>
-    <span class="val" id="fwVal">18</span>
+    <span class="val" id="fwVal">8</span>
   </div>
-  <input id="fw" type="range" min="0" max="40" step="1" value="18">
+  <input id="fw" type="range" min="0" max="24" step="1" value="8">
 </div>
 
 <div id="hint"></div>
@@ -166,6 +166,7 @@
   <button id="pick">载入我的视频</button>
   <button id="start">启用摄像头</button>
   <button id="demoVideo">示例视频</button>
+  <button id="exitFull" style="display:none">退出全屏</button>
 </div>
 <input id="file" type="file" accept="video/*" style="display:none">
 
@@ -370,22 +371,32 @@ function renderMask() {
       mctx.rotate(r.ang);
       const rw = (r.w / 2 + pad), rh = (r.h / 2 + pad);
       const rad = Math.min(rw, rh) * 0.35;
-      // 口子：矩形内部完全透明，像撕开一道缝看到后面的视频
+      // 1) 先用极小的软边把矩形内部整体挖透（核心：保证内部 100% 透明）
+      mctx.filter = 'blur(2px)';
       mctx.beginPath();
       roundRect(mctx, -rw, -rh, rw * 2, rh * 2, rad);
       mctx.fillStyle = 'rgba(0,0,0,1)';
       mctx.fill();
-      // 边缘羽化，让口子看起来更自然
-      mctx.globalCompositeOperation = 'destination-out';
-      mctx.filter = 'blur(' + Math.round(FEATHER * 0.5 + 6) + 'px)';
-      mctx.globalAlpha = 0.55;
-      const fw = rw + FEATHER, fh = rh + FEATHER;
-      mctx.beginPath();
-      roundRect(mctx, -fw, -fh, fw * 2, fh * 2, rad + 10);
-      mctx.fillStyle = 'rgba(0,0,0,1)';
-      mctx.fill();
       mctx.filter = 'none';
-      mctx.globalAlpha = 1;
+
+      // 2) 羽化只作用在边缘一圈：向外扩张的环形渐进擦除
+      if (FEATHER > 0) {
+        const steps = 6;
+        for (let i = steps; i >= 1; i--) {
+          const k = i / steps;                 // 1 → 0
+          const grow = FEATHER * (1 - k) + FEATHER * 0.5;
+          const fw = rw + grow * k + FEATHER * 0.5;
+          const fh = rh + grow * k + FEATHER * 0.5;
+          mctx.globalAlpha = 0.92;
+          mctx.filter = 'blur(' + Math.round(1 + FEATHER * 0.35) + 'px)';
+          mctx.beginPath();
+          roundRect(mctx, -fw, -fh, fw * 2, fh * 2, rad + grow * 0.4);
+          mctx.fillStyle = 'rgba(0,0,0,1)';
+          mctx.fill();
+        }
+        mctx.filter = 'none';
+        mctx.globalAlpha = 1;
+      }
       mctx.restore();
     } else if (pointPos) {
       // 单点模式：柔和光晕洞
@@ -648,8 +659,19 @@ $('#demoVideo').addEventListener('click', () => {
 
 $('#start').addEventListener('click', start);
 
+/* ---------- 退出全屏 ---------- */
+function exitFull() {
+  isFull = false;
+  targetFull = 0; fullMix = 0;
+  targetReveal = 0; reveal = 0;
+  smoothRect = null; mode = 'idle';
+  glitch();
+  setState('READY / 已退出全屏', '可重新比出矩形抠洞', 'ok');
+}
+$('#exitFull').addEventListener('click', exitFull);
+
 /* ---------- 可调参数 ---------- */
-let FEATHER = 18;
+let FEATHER = 8;
 $('#th').addEventListener('input', e => {
   FULL_THRESHOLD = Number(e.target.value) / 100;
   $('#thVal').textContent = e.target.value + '%';
@@ -673,6 +695,8 @@ function loop() {
   $('#fullbar').querySelector('.lbl').textContent = isFull
     ? 'FULLSCREEN / 已锁定'
     : 'FULLSCREEN PROGRESS (' + Math.round(FULL_THRESHOLD * 100) + '%)';
+  const exBtn = $('#exitFull');
+  if (exBtn) exBtn.style.display = isFull ? 'inline-block' : 'none';
   renderMask();
   if (isFull) {
     if (skel.width) sctx.clearRect(0, 0, skel.width, skel.height);
