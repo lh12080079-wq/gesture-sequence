@@ -547,7 +547,24 @@ function clenchScore(lm) {
   for (const i of TIPS) zSum += Math.abs((lm[i].z || 0) - (palm.z || 0));
   const zAvg = zSum / TIPS.length;
   const flatScore = clamp01((0.16 - zAvg) / 0.12);
-  return clamp01(nearScore * 0.5 + tightScore * 0.35 + flatScore * 0.15);
+  // ④ 手指弯曲度：指尖必须比第二指节更靠近掌心（真正的手指弯曲）
+  const FINGERS = [[8, 6], [12, 10], [16, 14], [20, 18]];  // [指尖, pip]
+  let bendSum = 0;
+  for (const [tip, pip] of FINGERS) {
+    const dTip = d2(lm[tip], palm), dPip = d2(lm[pip], palm);
+    // 指尖比 pip 更靠近掌心 → 弯曲；比值越小弯曲越充分
+    bendSum += clamp01((dPip - dTip) / (dPip * 0.55 + 1e-6));
+  }
+  const curlScore2 = clamp01(bendSum / FINGERS.length);
+  // ⑤ 拇指是否内收（拇指尖靠近食指根）
+  const thumbIn = clamp01((r * 1.5 - d2(lm[4], lm[5])) / (r * 1.0));
+  return clamp01(
+    nearScore * 0.32 +
+    tightScore * 0.24 +
+    flatScore * 0.10 +
+    curlScore2 * 0.26 +
+    thumbIn * 0.08
+  );
 }
 function spreadScore(lm) {
   const palm = lm[9], r = scaleOf(lm);
@@ -564,13 +581,13 @@ function tagNum(v, need) {
 }
 
 /* 滞回：进入需 ≥ ON，退出需 < OFF，避免临界抖动 */
-const CLENCH_ON = 0.55, CLENCH_OFF = 0.38;
+const CLENCH_ON = 0.66, CLENCH_OFF = 0.45;
 const SPREAD_ON = 0.55, SPREAD_OFF = 0.35;
 let clenchLatched = false, spreadLatched = false;
 
 /* ---- 模式稳定性：连续 N 帧一致才切换，避免抖动 ---- */
 let candMode = null, candCount = 0;
-const MODE_CONFIRM = 4;        // 需连续 4 帧（约 120ms）确认
+const MODE_CONFIRM = 9;        // 需连续 9 帧（约 270ms）确认，减少误触发
 function confirmMode(next) {
   if (next === mode) { candMode = null; candCount = 0; return true; }
   if (next === candMode) { candCount++; }
@@ -592,7 +609,7 @@ function curlScore(lm) {
   const worst = scores[0], avg = (scores[0] + scores[1] + scores[2]) / 3;
   return clamp01(worst * 0.6 + avg * 0.4);
 }
-const CURL_ON = 0.50, CURL_OFF = 0.32;
+const CURL_ON = 0.62, CURL_OFF = 0.42;
 function isOthersCurled(lm) {
   const s = curlScore(lm);
   lm.__curl = s;
@@ -1057,11 +1074,13 @@ function onHands(list) {
     mode = 'rect';
   }
 
-  // 四边形模式：必须两手「其余六指全部收紧」才触发
-  // 即每只手中指(12)/无名指(16)/小指(20)都要收拢，只伸食指(8)+拇指(4)
+  // 四边形模式：两手「其余六指全部收紧」+ 食指拇指张开，且需连续帧确认
+  const curls = list.map(lm => (lm.__curl = curlScore(lm)));
+  const opens = list.map(lm => (lm.__open2 = indexThumbOpen(lm) ? 1 : 0));
   const bothCurled = list.length >= 2 &&
-    list.every(lm => curlScore(lm) >= CURL_ON);
-  if (bothCurled) {
+    curls.every(c => c >= CURL_ON) &&
+    list.every(lm => indexThumbOpen(lm));
+  if (bothCurled && confirmMode('rect')) {
     const a = list[0], b = list[1];
     const g = computeRectGeo(a, b);
     rect = g;
@@ -1079,7 +1098,6 @@ function onHands(list) {
         smoothRect.pts[i].y += (g.pts[i].y - smoothRect.pts[i].y) * k;
       }
     }
-    confirmMode('rect');
     mode = 'rect';
     pointPos = null;
 
@@ -1103,13 +1121,19 @@ function onHands(list) {
     return;
   }
 
-  // 检测到两只手但六指未收紧：不触发四边形，明确提示
+  // 检测到两只手但六指未收紧：立即退出四边形，不触发
   if (list.length >= 2) {
-    mode = 'idle'; liveQuad = null; smoothRect = null;
-    targetReveal = 0; targetFull = 0;
-    const curls = list.map(lm => (lm.__curl = curlScore(lm)).toFixed(2)).join(' / ');
+    if (mode === 'rect') {
+      // 从四边形退出
+      liveQuad = null; smoothRect = null;
+      reveal = 0; targetReveal = 0; fullMix = 0; targetFull = 0;
+      setState('已退出四边形', '手指松开 — 重新收紧六指可再次触发', '');
+    }
+    mode = 'idle';
+    const cs = curls.map(c => c.toFixed(2)).join(' / ');
+    const os = opens.join(' / ');
     setState('收紧其余六指才触发四边形',
-      '两手都：中指/无名指/小指收拢，只伸食指+拇指｜收拢分 ' + curls + ' 需≥' + CURL_ON, 'warn');
+      '两手都：中/无名/小指收拢(收拢分 ' + cs + ' 需≥' + CURL_ON + ')，食指+拇指伸展(开 ' + os + '/2)', 'warn');
     return;
   }
 
