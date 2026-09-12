@@ -599,8 +599,8 @@ function tagNum(v, need) {
 }
 
 /* 滞回：进入需 ≥ ON，退出需 < OFF，避免临界抖动 */
-const CLENCH_ON = 0.52, CLENCH_OFF = 0.32;
-const SPREAD_ON = 0.45, SPREAD_OFF = 0.28;
+const CLENCH_ON = 0.45, CLENCH_OFF = 0.28;
+const SPREAD_ON = 0.40, SPREAD_OFF = 0.24;
 let clenchLatched = false, spreadLatched = false;
 let fanHoldFrames = 0;   // 扇形保持帧数，容忍短暂丢失
 /* 分数的时间平滑：历史队列取平均，避免单帧波动 */
