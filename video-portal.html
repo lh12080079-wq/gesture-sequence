@@ -12,12 +12,14 @@
   video{display:block}
 
   /* 底层：后台播放的视频 */
-  #bgvideo{position:fixed;left:0;top:0;width:100%;height:100%;object-fit:cover;z-index:0;background:#000}
+  #bgvideo{position:fixed;left:0;top:0;width:100%;height:100%;object-fit:cover;z-index:0;
+    background:#000;opacity:0;pointer-events:none}
 
   /* 上层：摄像头 + 挖洞遮罩（同一张画布，洞是透明的） */
   #mask{position:fixed;left:0;top:0;width:100%;height:100%;z-index:2;pointer-events:none}
+  /* 层级：z0 视频源 · z1 视频层(全屏) · z2 摄像头+挖洞 · z4 骨架 · z5+ 装饰 */
   /* 视频层：位于摄像头遮罩之上、装饰之下，专门按四边形透视绘制 */
-  #vlayer{position:fixed;left:0;top:0;width:100%;height:100%;z-index:3;pointer-events:none}
+  #vlayer{position:fixed;left:0;top:0;width:100%;height:100%;z-index:1;pointer-events:none}
 
   /* 隐藏的取景源 */
   #cam{position:fixed;left:-9999px;top:0;width:2px;height:2px;opacity:0;pointer-events:none}
@@ -401,10 +403,21 @@ function computeRectGeo(a, b) {
 const warpCanvas = document.createElement('canvas');
 const wctx = warpCanvas.getContext('2d');
 let warpTmp = null, warpTmpCtx = null;
-function drawVideoWarp(q) {
+function drawVideoFull() {
   const W = vlayer.width, H = vlayer.height;
-  vctx.clearRect(0, 0, W, H);
-  if (!q || q.length !== 4) return;
+  if (!W || !H) return;
+  if (bgVideo.readyState >= 2) {
+    if (vlayer.dataset.cleared !== '1') { vctx.clearRect(0, 0, W, H); vlayer.dataset.cleared = '1'; }
+    vctx.drawImage(bgVideo, 0, 0, W, H);
+  } else {
+    vctx.clearRect(0, 0, W, H);
+    vctx.fillStyle = '#05070e'; vctx.fillRect(0, 0, W, H);
+    vlayer.dataset.cleared = '0';
+  }
+}
+function drawVideoWarp(q) {
+  drawVideoFull();
+  return;
   if (warpCanvas.width !== W || warpCanvas.height !== H) {
     warpCanvas.width = W; warpCanvas.height = H;
   }
@@ -836,12 +849,8 @@ function loop() {
   const exBtn = $('#exitFull');
   if (exBtn) exBtn.style.display = isFull ? 'inline-block' : 'none';
   renderMask();
-  // 视频透视贴合到当前四边形（画在独立层，始终与四边形对齐）
-  if (liveQuad && liveQuad.length === 4 && bgVideo.readyState >= 2) {
-    drawVideoWarp(liveQuad);
-  } else if (vlayer.width) {
-    vctx.clearRect(0, 0, vlayer.width, vlayer.height);
-  }
+  // 视频层：始终全屏播放视频本体（固定不动）
+  drawVideoFull();
   if (isFull) {
     if (skel.width) sctx.clearRect(0, 0, skel.width, skel.height);
   } else {
