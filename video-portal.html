@@ -140,16 +140,16 @@
 </div>
 
 <div id="fullbar">
-  <div class="lbl">FULLSCREEN PROGRESS (80%)</div>
+  <div class="lbl">FULLSCREEN PROGRESS (35%)</div>
   <div class="track"><div class="fill2"></div></div>
 </div>
 
 <div id="tuner">
   <div class="row2">
     <span class="lab">触发阈值</span>
-    <span class="val" id="thVal">80%</span>
+    <span class="val" id="thVal">35%</span>
   </div>
-  <input id="th" type="range" min="30" max="95" step="1" value="80">
+  <input id="th" type="range" min="30" max="40" step="1" value="35">
   <div class="row2">
     <span class="lab">口子羽化</span>
     <span class="val" id="fwVal">8</span>
@@ -226,7 +226,7 @@ let liveQuad = null;   // 当前四边形四点（屏幕坐标）
 let lastArea = 0;      // 最近一次的四边形占屏比例
 let diagTick = 0;
 let diagEl = null;
-let FULL_THRESHOLD = 0.80;          // 可调：矩形占屏比例阈值（全屏触发）
+let FULL_THRESHOLD = 0.35;          // 可调 30%~40%：四边形占屏比例阈值（全屏触发）
 let isFull = false;                 // 是否已进入全屏（带滞回）
 let rect = { x: 0, y: 0, w: 0, h: 0, cx: 0, cy: 0, ang: 0 };
 let smoothRect = null;
@@ -991,6 +991,22 @@ function renderMask() {
   }
 
   // 全屏接管：整体淡出摄像头层
+  // 四边形：撑开感 —— 沿四条边加发光描边 + 顶点光斑
+  if (liveQuad && liveQuad.length === 4 && !isFull) {
+    const q = liveQuad;
+    mctx.save();
+    mctx.globalCompositeOperation = 'lighter';
+    mctx.lineWidth = Math.max(2, 5 * (1 - Math.min(1, lastArea / 0.4)));
+    mctx.strokeStyle = 'rgba(57,230,255,.55)';
+    mctx.shadowColor = 'rgba(57,230,255,.9)';
+    mctx.shadowBlur = 22;
+    mctx.beginPath();
+    mctx.moveTo(q[0].x, q[0].y);
+    for (let i = 1; i < 4; i++) mctx.lineTo(q[i].x, q[i].y);
+    mctx.closePath(); mctx.stroke();
+    mctx.restore();
+  }
+
   // 扇形模式：在三角形区域叠加滤镜色调
   if (mode === 'fan' && fanTriangles.length) renderFanFilters();
 
@@ -1199,11 +1215,11 @@ function onHands(list) {
     // 平滑
     if (!smoothRect) smoothRect = { cx: g.cx, cy: g.cy, area: g.area, pts: g.pts.map(q => ({ x: q.x, y: q.y })) };
     else {
-      const k = 0.35;
+      // 更低系数 = 更顺滑的跟随（配合关键点滤波，整体手感连贯）
+      const k = 0.22;
       smoothRect.cx += (g.cx - smoothRect.cx) * k;
       smoothRect.cy += (g.cy - smoothRect.cy) * k;
       smoothRect.area += (g.area - smoothRect.area) * k;
-      // 四个顶点逐点平滑，跟随任意四边形
       if (!smoothRect.pts) smoothRect.pts = g.pts.map(q => ({ x: q.x, y: q.y }));
       else for (let i = 0; i < 4; i++) {
         smoothRect.pts[i].x += (g.pts[i].x - smoothRect.pts[i].x) * k;
@@ -1338,7 +1354,7 @@ async function start() {
       requestAnimationFrame(tick);
       if (cam.readyState < 2) return;
       const now = performance.now();
-      if (now - prev < 26) return;
+      if (now - prev < 15) return;   // 约 60fps，提升跟随流畅度
       prev = now;
       let raw = [];
       try { raw = landmarker.detectForVideo(cam, now).landmarks || []; } catch (e) { return; }
@@ -1446,7 +1462,7 @@ $('#fw').addEventListener('input', e => {
 function loop() {
   requestAnimationFrame(loop);
   const lerp = (a, b, k) => a + (b - a) * k;
-  reveal = lerp(reveal, targetReveal, 0.12);
+  reveal = lerp(reveal, targetReveal, 0.18);
   fullMix = lerp(fullMix, targetFull, 0.08);
   $('#fullbar').style.opacity = fullMix > 0.05 ? 1 : 0;
   $('#fullbar').querySelector('.fill2').style.width = Math.round(fullMix * 100) + '%';
