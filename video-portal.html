@@ -156,7 +156,8 @@
   <span class="p">双手食指+拇指</span> → 构成矩形<br>
   <span class="p">矩形</span> → 像漏洞一样看到后台视频<br>
   <span class="p">矩形</span> 内实时透出视频画面<br>
-  <span class="k">撑满阈值</span> → 视频全屏接管（可调）<br>
+  <span class="k">撑满阈值</span> → 全屏接管并锁定，不再退回<br>
+  <span class="k">矩形内</span> 视频 · <span class="k">矩形外</span> 摄像头<br>
   <span class="k">阈值</span> 右上角滑杆实时调节<br>
   <span class="k">先载入</span> 你自己的视频文件
 </div>
@@ -473,10 +474,12 @@ function glitch() {
 function onHands(list) {
   lastList = list;
   const now = performance.now();
+  if (isFull) { handsEl.textContent = 'HANDS: 全屏已锁定'; return; }
   handsEl.textContent = 'HANDS: ' + list.length;
   if (!list.length) {
+    if (isFull) { handsEl.textContent = 'HANDS: 0 / 全屏已锁定'; return; }
     if (now - lastSeen > 350) {
-      mode = 'idle'; targetReveal = 0; targetFull = 0; pointPos = null;
+      mode = 'idle'; targetReveal = 0; pointPos = null;
       setState('IDLE', '把手放进画面', '');
     }
     return;
@@ -521,12 +524,12 @@ function onHands(list) {
     const area = (rect.w * rect.h) / (skel.width * skel.height);
     targetReveal = 1;   // 口子始终完全透出视频
     // 撑满屏幕面积的 80% 时进入全屏，并锁定（不再响应手势）
-    if (area >= FULL_THRESHOLD) {
-      if (!isFull) { isFull = true; glitch(); setState('FULL / 全屏播放', '全屏中 — 双手分开即可退出', 'full'); }
+    if (area >= FULL_THRESHOLD && !isFull) {
+      // 达到阈值：进入全屏并永久锁定，不再退回
+      isFull = true;
       targetFull = 1;
-    } else if (area < FULL_THRESHOLD * 0.75) {
-      if (isFull) { isFull = false; glitch(); setState('RECT / 抠洞', '食指与拇指构成矩形 — 透过它看视频', 'live'); }
-      targetFull = 0;
+      glitch();
+      setState('FULL / 全屏播放', '已进入全屏 — 不会因手势变化退出', 'full');
     }
 
     else setState('RECT / 抠洞', '食指与拇指构成矩形 — 透过它看视频', 'live');
@@ -667,9 +670,15 @@ function loop() {
   fullMix = lerp(fullMix, targetFull, 0.08);
   $('#fullbar').style.opacity = fullMix > 0.05 ? 1 : 0;
   $('#fullbar').querySelector('.fill2').style.width = Math.round(fullMix * 100) + '%';
-  $('#fullbar').querySelector('.lbl').textContent = 'FULLSCREEN PROGRESS (' + Math.round(FULL_THRESHOLD * 100) + '%)';
+  $('#fullbar').querySelector('.lbl').textContent = isFull
+    ? 'FULLSCREEN / 已锁定'
+    : 'FULLSCREEN PROGRESS (' + Math.round(FULL_THRESHOLD * 100) + '%)';
   renderMask();
-  drawSkeleton(lastList, mode === 'point');
+  if (isFull) {
+    if (skel.width) sctx.clearRect(0, 0, skel.width, skel.height);
+  } else {
+    drawSkeleton(lastList, mode === 'point');
+  }
   drawHexGrid();
 }
 loop();
