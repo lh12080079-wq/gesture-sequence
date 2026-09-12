@@ -53,7 +53,7 @@
   #loadState{margin-top:6px;font-size:9px;color:#8fb0dd;max-width:46vw;word-break:break-all}
 
   #diag{position:fixed;z-index:11;left:20px;bottom:calc(18px + env(safe-area-inset-bottom));
-    font-size:10px;line-height:1.75;color:#9fe6ff;background:rgba(4,12,24,.82);
+    font-size:11px;line-height:1.8;color:#9fe6ff;background:rgba(4,12,24,.86);
     border:1px solid rgba(57,230,255,.35);border-radius:9px;padding:9px 13px;
     font-family:Consolas,monospace;letter-spacing:.04em;pointer-events:none;white-space:pre}
   #diag .warn2{color:#ffb35c}#diag .ok2{color:#5cffb0}#diag .bad2{color:#ff6b9e}
@@ -535,7 +535,7 @@ function clenchScore(lm) {
   let nearSum = 0;
   for (const i of TIPS) nearSum += Math.min(1.6, d2(lm[i], palm) / r);
   const nearAvg = nearSum / TIPS.length;              // ~0.6 攥紧, ~2.0 张开
-  const nearScore = clamp01((1.45 - nearAvg) / 0.85); // 1.45 以上算张开
+  const nearScore = clamp01((1.55 - nearAvg) / 0.75); // 放宽：更容易判为攥紧
   // ② 指尖之间的紧凑度
   let maxd = 0;
   for (let i = 0; i < TIPS.length; i++)
@@ -556,23 +556,30 @@ function spreadScore(lm) {
   return clamp01((out + thumb) / 5);
 }
 function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+/* 诊断用：达标显示绿色，未达标显示橙色 */
+function tagNum(v, need) {
+  const n = typeof v === 'number' ? v : 0;
+  const cls = n >= need ? 'ok2' : 'warn2';
+  return '<span class="' + cls + '">' + n.toFixed(2) + '</span>';
+}
 
 /* 滞回：进入需 ≥ ON，退出需 < OFF，避免临界抖动 */
-const CLENCH_ON = 0.62, CLENCH_OFF = 0.42;
-const SPREAD_ON = 0.60, SPREAD_OFF = 0.40;
+const CLENCH_ON = 0.55, CLENCH_OFF = 0.38;
+const SPREAD_ON = 0.55, SPREAD_OFF = 0.35;
 let clenchLatched = false, spreadLatched = false;
 /* 四边形模式专用：一只手的"其余三指"必须收紧
    食指(8)与拇指(4)用来构成框角，中指(12)/无名指(16)/小指(20)必须收拢 */
 function curlScore(lm) {
   const palm = lm[9], r = scaleOf(lm);
   const OTHERS = [12, 16, 20];
-  let sum = 0;
-  for (const i of OTHERS) sum += Math.min(1.8, d2(lm[i], palm) / r);
-  const avg = sum / OTHERS.length;
-  // 指尖离掌心越近分越高（0.9 以下算收拢）
-  return clamp01((1.45 - avg) / 0.6);
+  // 逐指打分，用"最好的两指"加权，避免某一指不听话拉低整体
+  const scores = OTHERS.map(i => clamp01((1.75 - d2(lm[i], palm) / r) / 0.75));
+  scores.sort((a, b) => b - a);
+  const top2 = (scores[0] + scores[1]) / 2;
+  const all3 = (scores[0] + scores[1] + scores[2]) / 3;
+  return clamp01(top2 * 0.6 + all3 * 0.4);
 }
-const CURL_ON = 0.60, CURL_OFF = 0.40;
+const CURL_ON = 0.55, CURL_OFF = 0.35;
 function isOthersCurled(lm) {
   const s = curlScore(lm);
   lm.__curl = s;
@@ -581,8 +588,8 @@ function isOthersCurled(lm) {
 /* 食指与拇指必须张开（构成框角） */
 function indexThumbOpen(lm) {
   const palm = lm[9], r = scaleOf(lm);
-  const idx = d2(lm[8], palm) > r * 1.45;
-  const th = d2(lm[4], palm) > r * 1.05;
+  const idx = d2(lm[8], palm) > r * 1.25;
+  const th = d2(lm[4], palm) > r * 0.95;
   lm.__open2 = (idx ? 1 : 0) + (th ? 1 : 0);
   return idx && th;
 }
@@ -1305,10 +1312,10 @@ function loop() {
       '画布 mask ' + maskCanvas.width + 'x' + maskCanvas.height + ' vlay ' + vlayer.width + 'x' + vlayer.height + '\n' +
       '手 ' + lastList.length + ' | mode <span class="' + (mode === 'fan' ? 'ok2' : (mode === 'rect' ? 'warn2' : '')) + '">' + mode + '</span>' +
       ' | reveal ' + R(reveal, 2) + ' | fullMix ' + R(fullMix, 2) + '\n' +
-      '握拳 ' + lastList.map(l => R(l.__clench || 0, 2)).join('/') +
-      ' 张开 ' + lastList.map(l => R(l.__spread || 0, 2)).join('/') +
-      ' 收拢 ' + lastList.map(l => R(l.__curl || 0, 2)).join('/') +
-      '\n需: 握≥' + CLENCH_ON + ' 张≥' + SPREAD_ON + ' 收拢≥' + CURL_ON + '\n' +
+      '握拳 ' + lastList.map(l => tagNum(l.__clench, CLENCH_ON)).join(' ') +
+      ' 张开 ' + lastList.map(l => tagNum(l.__spread, SPREAD_ON)).join(' ') +
+      ' 收拢 ' + lastList.map(l => tagNum(l.__curl, CURL_ON)).join(' ') + '\n' +
+      '↑ 绿=达标(握≥' + CLENCH_ON + ' 张≥' + SPREAD_ON + ' 收拢≥' + CURL_ON + ')\n' +
       '四点 ' + q + '\n' +
       '占屏 <span class="' + (lastArea >= FULL_THRESHOLD ? 'ok2' : 'warn2') + '">' + R(lastArea * 100, 1) + '%</span>' +
       ' / 阈值 ' + R(FULL_THRESHOLD * 100, 0) + '% | isFull ' + (isFull ? 'Y' : 'N');
