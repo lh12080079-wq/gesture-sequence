@@ -144,16 +144,16 @@
 </div>
 
 <div id="fullbar">
-  <div class="lbl">FULLSCREEN PROGRESS (50%)</div>
+  <div class="lbl">FULLSCREEN PROGRESS (65%)</div>
   <div class="track"><div class="fill2"></div></div>
 </div>
 
 <div id="tuner">
   <div class="row2">
     <span class="lab">触发阈值</span>
-    <span class="val" id="thVal">50%</span>
+    <span class="val" id="thVal">65%</span>
   </div>
-  <input id="th" type="range" min="50" max="50" step="1" value="50" disabled>
+  <input id="th" type="range" min="60" max="70" step="1" value="65">
   <div class="row2">
     <span class="lab">口子羽化</span>
     <span class="val" id="fwVal">8</span>
@@ -231,7 +231,7 @@ let liveQuad = null;   // 当前四边形四点（屏幕坐标）
 let lastArea = 0;      // 最近一次的四边形占屏比例
 let diagTick = 0;
 let diagEl = null;
-let FULL_THRESHOLD = 0.50;          // 锁定 50%：四边形占屏比例阈值（全屏触发）
+let FULL_THRESHOLD = 0.65;          // 可调 60%~70%：四边形占屏比例阈值（全屏触发）
 let isFull = false;                 // 是否已进入全屏（带滞回）
 let rect = { x: 0, y: 0, w: 0, h: 0, cx: 0, cy: 0, ang: 0 };
 let smoothRect = null;
@@ -1552,9 +1552,12 @@ $('#exitFull').addEventListener('click', exitFull);   // 见下方函数声明
 
 /* ---------- 可调参数 ---------- */
 let FEATHER = 8;
-/* 阈值锁定为 50%，滑杆禁用 */
-$('#thVal').textContent = '50%';
-$('#fullbar').querySelector('.lbl').textContent = 'FULLSCREEN PROGRESS (50%)';
+/* 阈值可调：60%~70% */
+$('#th').addEventListener('input', e => {
+  FULL_THRESHOLD = Number(e.target.value) / 100;
+  $('#thVal').textContent = e.target.value + '%';
+  $('#fullbar').querySelector('.lbl').textContent = 'FULLSCREEN PROGRESS (' + e.target.value + '%)';
+});
 $('#fw').addEventListener('input', e => {
   FEATHER = Number(e.target.value);
   $('#fwVal').textContent = e.target.value;
