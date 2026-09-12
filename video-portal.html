@@ -213,6 +213,7 @@ let reveal = 0, targetReveal = 0;   // 0..1 洞的张开度
 let fullMix = 0, targetFull = 0;    // 0..1 全屏混合
 let lastList = [];
 let liveQuad = null;   // 当前四边形四点（屏幕坐标）
+let lastArea = 0;      // 最近一次的四边形占屏比例
 let FULL_THRESHOLD = 0.80;          // 可调：矩形占屏比例阈值（全屏触发）
 let isFull = false;                 // 是否已进入全屏（带滞回）
 let rect = { x: 0, y: 0, w: 0, h: 0, cx: 0, cy: 0, ang: 0 };
@@ -406,13 +407,23 @@ let warpTmp = null, warpTmpCtx = null;
 function drawVideoFull() {
   const W = vlayer.width, H = vlayer.height;
   if (!W || !H) return;
-  if (bgVideo.readyState >= 2) {
-    if (vlayer.dataset.cleared !== '1') { vctx.clearRect(0, 0, W, H); vlayer.dataset.cleared = '1'; }
-    vctx.drawImage(bgVideo, 0, 0, W, H);
+  vctx.setTransform(1, 0, 0, 1, 0, 0);
+  vctx.clearRect(0, 0, W, H);
+  if (bgVideo.readyState >= 2 && bgVideo.videoWidth) {
+    // 视频全屏铺满，保持宽高比裁剪（cover），位置固定不动。
+    // 注意：与摄像头层的镜像保持一致，保证洞里看到的画面与摄像头坐标对齐。
+    const vw = bgVideo.videoWidth, vh = bgVideo.videoHeight;
+    const scale = Math.max(W / vw, H / vh);
+    const dw = vw * scale, dh = vh * scale;
+    const dx = (W - dw) / 2, dy = (H - dh) / 2;
+    // 用与摄像头层相同的镜像方式绘制，使两层坐标系完全一致
+    vctx.save();
+    vctx.translate(W, 0);
+    vctx.scale(-1, 1);
+    vctx.drawImage(bgVideo, dx, dy, dw, dh);
+    vctx.restore();
   } else {
-    vctx.clearRect(0, 0, W, H);
     vctx.fillStyle = '#05070e'; vctx.fillRect(0, 0, W, H);
-    vlayer.dataset.cleared = '0';
   }
 }
 function drawVideoWarp(q) {
@@ -572,9 +583,10 @@ function renderMask() {
   }
 
   // 全屏接管：整体淡出摄像头层
+  // 全屏：摄像头层整体淡出，视频层完全显露
   if (fullMix > 0.001) {
     mctx.globalCompositeOperation = 'destination-out';
-    mctx.globalAlpha = fullMix;
+    mctx.globalAlpha = Math.min(1, fullMix);
     mctx.fillStyle = '#000';
     mctx.fillRect(0, 0, W, H);
     mctx.globalAlpha = 1;
@@ -671,18 +683,20 @@ function onHands(list) {
 
     // 洞占屏比例 → 决定 reveal 与全屏
     liveQuad = smoothRect.pts;
-    const area = rect.area / (skel.width * skel.height);
+    // 用平滑后的面积，避免抖动导致阈值判定不稳
+    const area = smoothRect.area / (skel.width * skel.height);
     targetReveal = 1;   // 口子始终完全透出视频
-    // 撑满屏幕面积的 80% 时进入全屏，并锁定（不再响应手势）
-    if (area >= FULL_THRESHOLD && !isFull) {
-      // 达到阈值：进入全屏并永久锁定，不再退回
-      isFull = true;
-      targetFull = 1;
-      glitch();
-      setState('FULL / 全屏播放', '已进入全屏 — 不会因手势变化退出', 'full');
+    lastArea = area;
+    if (!isFull) {
+      if (area >= FULL_THRESHOLD) {
+        isFull = true;
+        targetFull = 1;
+        glitch();
+        setState('FULL / 全屏播放', '已进入全屏 — 不会因手势变化退出', 'full');
+      } else {
+        setState('RECT / 抠洞 ' + Math.round(area * 100) + '%', '四指比框 — 透过四边形看视频', 'live');
+      }
     }
-
-    else setState('RECT / 抠洞', '四指比框 — 透过四边形看视频', 'live');
     return;
   }
 
