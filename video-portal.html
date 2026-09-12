@@ -625,9 +625,12 @@ function curlScore(lm) {
 }
 /* 食指与拇指必须"明显伸开"才允许四边形 */
 function indexThumbClearlyOpen(lm) {
-  const palm = palmOf(lm), r = scaleOf(lm);
-  // 用 3D 距离；正常伸直食指约 2.0~2.6，拇指约 1.2~1.8
-  return d3(lm[8], palm) / r > 1.30 && d3(lm[4], palm) / r > 0.95;
+  // 用「指尖 vs 该指第二关节」的伸展比：伸直时指尖明显更远离掌指关节
+  // 食指：指尖(8) 对比 pip(6)；拇指：指尖(4) 对比 mcp(2)
+  const idxRatio = d2(lm[8], lm[5]) / (d2(lm[6], lm[5]) + 1e-6);   // 指尖相对食指根
+  const thumbRatio = d2(lm[4], lm[2]) / (d2(lm[3], lm[2]) + 1e-6); // 指尖相对拇指根
+  lm.__idxR = idxRatio; lm.__thumbR = thumbRatio;
+  return idxRatio > 1.55 && thumbRatio > 1.25;
 }
 const CURL_ON = 0.58, CURL_OFF = 0.38;
 function isOthersCurled(lm) {
@@ -1388,9 +1391,11 @@ function loop() {
       ' 收拢 ' + lastList.map(l => tagNum(l.__curl, CURL_ON)).join(' ') +
       ' 开指 ' + lastList.map(l => (l.__open3 ? 'Y' : 'N')).join(' ') +
       ' 伸开 ' + lastList.map(l => {
-        if (!l[8]) return '-';
-        const rr = scaleOf(l), pp = palmOf(l);
-        return (d3(l[8], pp) / rr).toFixed(2) + '/' + (d3(l[4], pp) / rr).toFixed(2);
+        if (!l[4]) return '-';
+        // 实时算一次，确保面板显示的就是判定用的值
+        const ir = d2(l[8], l[5]) / (d2(l[6], l[5]) + 1e-6);
+        const tr = d2(l[4], l[2]) / (d2(l[3], l[2]) + 1e-6);
+        return ir.toFixed(2) + '/' + tr.toFixed(2);
       }).join(' ') + '\n' +
       '↑ 绿=达标(握≥' + CLENCH_ON + ' 张≥' + SPREAD_ON + ' 收拢≥' + CURL_ON + ')\n' +
       '四点 ' + q + '\n' +
