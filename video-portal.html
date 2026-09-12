@@ -1826,9 +1826,27 @@ $('#file').addEventListener('change', e => {
   if (bgVideo.readyState >= 2) onReady();
   else {
     bgVideo.addEventListener('loadeddata', onReady, { once: true });
-    bgVideo.addEventListener('error', () => {
-      $('#loadState').textContent = '视频载入失败：格式可能不被浏览器支持';
+    bgVideo.addEventListener('loadedmetadata', () => {
+      // 元数据可读但画面解不出：多半是编码不受支持
+      if (!bgVideo.videoWidth) {
+        $('#loadState').textContent = '元数据可读但无法解码画面 — 编码可能不受支持（如 H.265/HEVC）';
+      }
     }, { once: true });
+    bgVideo.addEventListener('error', () => {
+      const err = bgVideo.error;
+      const codes = { 1: '载入被中止', 2: '网络错误', 3: '解码失败', 4: '格式/编码不支持' };
+      const c = err ? (codes[err.code] || ('错误码 ' + err.code)) : '未知错误';
+      $('#loadState').textContent = '视频载入失败：' + c +
+        '（建议转成 H.264 编码的 MP4）';
+      showErr('视频无法播放：' + c + '。\n\n常见原因：HEVC/H.265 编码、MKV 封装、或 AV1 编码在部分浏览器不受支持。\n建议用工具转码为「H.264 + AAC 的 MP4」。');
+    }, { once: true });
+    // 8 秒仍未出画面 → 提示排查
+    setTimeout(() => {
+      if (hasUserVideo && !bgVideo.videoWidth && bgVideo.readyState < 2) {
+        $('#loadState').textContent = '视频长时间无法解码 — 请查看屏幕中央提示';
+        showErr('这个视频无法在浏览器中解码显示。\n\n可能原因：\n• H.265 / HEVC 编码\n• MKV / AVI 封装\n• AV1 或特殊编码\n\n解决办法：转码成「H.264 + AAC」的 MP4 格式即可正常播放。');
+      }
+    }, 8000);
   }
 });
 $('#demoVideo').addEventListener('click', () => {
@@ -1947,9 +1965,10 @@ function loop() {
       ? liveQuad.map(p => '(' + Math.round(p.x) + ',' + Math.round(p.y) + ')').join(' ')
       : '无四点';
     const camTxt = camOn ? '<span class="ok2">开</span>' : '<span class="bad2">关</span>';
+    const vErr = bgVideo.error ? (' err' + bgVideo.error.code) : '';
     const vidTxt = (bgVideo.readyState >= 2)
       ? '<span class="ok2">' + bgVideo.videoWidth + 'x' + bgVideo.videoHeight + '</span>'
-      : '<span class="bad2">未就绪 ' + bgVideo.readyState + '</span>';
+      : '<span class="bad2">未就绪 rs=' + bgVideo.readyState + vErr + '</span>';
     diagEl.innerHTML =
       '摄像头 ' + camTxt + ' | 视频 ' + vidTxt + '\n' +
       '画布 ' + maskCanvas.width + 'x' + maskCanvas.height +
