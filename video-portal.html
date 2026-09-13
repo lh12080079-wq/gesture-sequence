@@ -401,9 +401,10 @@ function isFist(lm) {
 
 /* ---------- 骨架绘制 ---------- */
 function drawSkeleton(list, hasPoint) {
-  if (!SHOW_SKELETON) return;   // 骨架线开关关闭时跳过
   resizeSkel();
+  // 无论开关如何，都要清空画布，否则会残留痕迹
   sctx.clearRect(0, 0, skel.width, skel.height);
+  if (!SHOW_SKELETON) return;
   if (!list.length) return;
   const pt = p => ({ x: (1 - p.x) * CANVAS_W, y: p.y * CANVAS_H });
   sctx.lineCap = 'round';
@@ -681,7 +682,7 @@ const scoreHist = { clench: [[], []], spread: [[], []], curl: [[], []] };
 function smoothScore(kind, idx, v) {
   const q = scoreHist[kind][idx] || (scoreHist[kind][idx] = []);
   // 窗口按类型区分：收拢/张开需快速响应，握拳需稳定
-  const win = (kind === 'curl') ? 3 : (kind === 'clench' ? 6 : 4);
+  const win = (kind === 'curl') ? 2 : (kind === 'clench' ? 6 : 4);
   q.push(v); if (q.length > win) q.shift();
   let s = 0; for (const x of q) s += x;
   return s / q.length;
@@ -723,9 +724,9 @@ function indexThumbClearlyOpen(lm) {
   const idxRatio = d2(lm[8], lm[5]) / (d2(lm[6], lm[5]) + 1e-6);   // 指尖相对食指根
   const thumbRatio = d2(lm[4], lm[2]) / (d2(lm[3], lm[2]) + 1e-6); // 指尖相对拇指根
   lm.__idxR = idxRatio; lm.__thumbR = thumbRatio;
-  return idxRatio > 1.55 && thumbRatio > 1.25;
+  return idxRatio > 1.25 && thumbRatio > 1.05;
 }
-const CURL_ON = 0.42, CURL_OFF = 0.28;
+const CURL_ON = 0.38, CURL_OFF = 0.25;
 function isOthersCurled(lm) {
   const s = curlScore(lm);
   lm.__curl = s;
@@ -1371,10 +1372,10 @@ function onHands(list) {
     for (const sc of scores) {
       if (sc.c >= clNeed && sc.c >= sc.s && sc.c > bestCl) { bestCl = sc.c; ci = sc.i; }
     }
-    // 张开手：另一只手直接担任（不设张开分门槛）
+    // 张开手：另一只手必须「不是攥拳状态」才担任（防止双手都攥拳时误触发滤镜）
     if (ci >= 0) {
       const other = scores.filter(x => x.i !== ci).sort((a, b) => b.s - a.s)[0];
-      if (other) si = other.i;
+      if (other && other.c < CLENCH_ON) si = other.i;   // 双手都攥拳 → 不触发扇形
     }
     if (ci >= 0 && si >= 0 && ci !== si) {
       const cp = clenchedPoint(list[ci]);
@@ -1425,11 +1426,9 @@ function onHands(list) {
   const curls = list.map((lm, i) => (lm.__curl = smoothScore('curl', i, curlScore(lm))));
   const opens = list.map(lm => (lm.__open3 = indexThumbClearlyOpen(lm) ? 1 : 0));
   const opensOk = list.map(lm => indexThumbClearlyOpen(lm));
-  // 已在四边形模式时放宽维持门槛，避免轻微抖动就掉出
-  const curlNeed = (mode === 'rect') ? CURL_ON - 0.12 : CURL_ON;
-  const bothCurled = list.length >= 2 &&
-    curls.every(c => c >= curlNeed) &&
-    (mode === 'rect' || opensOk.every(v => v));
+  // 判定：两只手的其余三指收拢即可（食指拇指自然呈现框角，不强求"明显伸开"）
+  const curlNeed = (mode === 'rect') ? CURL_ON - 0.15 : CURL_ON;
+  const bothCurled = list.length >= 2 && curls.every(c => c >= curlNeed);
   if (bothCurled && confirmMode('rect') && canSwitch('rect')) {
     const a = list[0], b = list[1];
     const g = computeRectGeo(a, b);
@@ -2029,13 +2028,9 @@ function loop() {
     if (mode === 'fan' && fanApex && fanTips.length === 5) {
       drawFanUI(fanApex, fanTips, performance.now());
     }
-    // 二进制数字交互反馈：四边形模式下跟随四点移动
-    if (SHOW_BINARY && liveQuad && liveQuad.length === 4) {
+    // 二进制数字只在四边形模式下绘制（避免残影）
+    if (SHOW_BINARY && mode === 'rect' && liveQuad && liveQuad.length === 4) {
       drawBinaryUI(liveQuad, performance.now());
-    }
-    // 扇形模式下也绘制二进制数字（跟随五指）
-    if (SHOW_BINARY && mode === 'fan' && fanTips.length === 5) {
-      drawFanBinary(fanApex, fanTips, performance.now());
     }
   }
   drawHexGrid();
