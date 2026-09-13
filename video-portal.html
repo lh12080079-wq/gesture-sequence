@@ -819,8 +819,7 @@ function drawFanUI(apex, tips, t) {
     sctx.lineTo(A.x, A.y);
     sctx.lineTo(B.x, B.y);
     sctx.closePath();
-    sctx.fillStyle = col + '0.06)';
-    sctx.fill();
+    // 不填充，只描边（避免出现暗色块/黑点）
 
     // 三角形边框
     sctx.strokeStyle = col + '0.85)';
@@ -849,20 +848,6 @@ function drawFanUI(apex, tips, t) {
   }
   sctx.setLineDash([]);
 
-  // 汇聚点：高亮大圆
-  sctx.shadowColor = 'rgba(255,92,200,1)'; sctx.shadowBlur = 32;
-  sctx.fillStyle = 'rgba(255,92,200,.98)';
-  // 汇聚点不画圆，只保留辐射线
-  sctx.shadowBlur = 0;
-
-  // 五个指尖节点
-  for (let i = 0; i < tips.length; i++) {
-    const q = tips[i];
-    sctx.fillStyle = 'rgba(255,92,200,.95)';
-    sctx.shadowColor = 'rgba(255,92,200,1)'; sctx.shadowBlur = 20;
-    // 指尖不画圆点
-    sctx.shadowBlur = 0;
-  }
 
   // 二进制数字反馈
   sctx.font = '700 14px Consolas, monospace';
@@ -1393,11 +1378,12 @@ function onHands(list) {
     const opens0 = list.map(lm => indexThumbClearlyOpen(lm));
     const curled0 = list.map(lm => othersReallyCurled(lm));
     list.forEach((lm, i) => { lm.__open3 = opens0[i] ? 1 : 0; });
-    // 已在四边形中时，仅放宽收拢分（手指状态仍须正确）
-    // 已在四边形中时大幅放宽，转手/抖动不会掉出
-    const curlNeed0 = (mode === 'rect') ? CURL_ON - 0.30 : CURL_ON;
-    const strictOk = curls0.every(c => c >= curlNeed0) && opens0.every(v => v) && curled0.every(v => v);
-    if (strictOk) {
+    // 进入条件：收拢达标 + 食指拇指伸直 + 三指确实弯曲
+    // 维持条件：只要食指拇指还伸着就保持（不再看分数，避免抖动掉出）
+    const okNow = (mode === 'rect')
+      ? list.every(lm => indexThumbClearlyOpen(lm))
+      : (curls0.every(c => c >= CURL_ON) && opens0.every(v => v) && curled0.every(v => v));
+    if (okNow) {
       const a = list[0], b = list[1];
       const g = computeRectGeo(a, b);
       rect = g;
