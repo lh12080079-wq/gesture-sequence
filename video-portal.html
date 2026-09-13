@@ -416,53 +416,18 @@ function drawSkeleton(list, hasPoint) {
     }
     sctx.shadowBlur = 0;
 
-    // 非关键关节：淡化的小点
-    sctx.fillStyle = CYAN + '.45)';
-    for (let i = 0; i < lm.length; i++) {
-      if ([4, 8, 12, 16, 20].includes(i)) continue;
-      const q = pt(lm[i]);
-      sctx.beginPath(); sctx.arc(q.x, q.y, 1.8, 0, Math.PI * 2); sctx.fill();
-    }
-
-    // 其余三指：常规显示
-    for (const i of [12, 16, 20]) {
-      const q = pt(lm[i]);
-      sctx.fillStyle = CYAN + '.7)';
-      sctx.beginPath(); sctx.arc(q.x, q.y, 3.6, 0, Math.PI * 2); sctx.fill();
-    }
-
-    // 四个关键点：食指(8) 与 拇指(4)，用粉色高亮加光环
-    for (const i of [4, 8]) {
-      const q = pt(lm[i]);
-      sctx.shadowColor = PINK + '1)'; sctx.shadowBlur = 26;
-      sctx.fillStyle = PINK + '.98)';
-      sctx.beginPath(); sctx.arc(q.x, q.y, 7, 0, Math.PI * 2); sctx.fill();
-      sctx.strokeStyle = CYAN + '.95)'; sctx.lineWidth = 2.2;
-      sctx.beginPath(); sctx.arc(q.x, q.y, 13, 0, Math.PI * 2); sctx.stroke();
-      sctx.shadowBlur = 0;
-    }
-    sctx.shadowBlur = 0;
+    // 只保留骨架连线，不绘制任何圆点
   });
 
-  // 单点：五指汇聚成一个发光圆点
+  // 单点模式：只在另一只手存在时连线，不画任何圆点
   if (hasPoint && list[0]) {
     const c = pt(list[0][9]);
-    sctx.shadowColor = PINK + '1)'; sctx.shadowBlur = 30;
-    sctx.fillStyle = PINK + '.95)';
-    sctx.beginPath(); sctx.arc(c.x, c.y, 10, 0, Math.PI * 2); sctx.fill();
-    sctx.strokeStyle = CYAN + '.9)'; sctx.lineWidth = 2.4;
-    sctx.beginPath(); sctx.arc(c.x, c.y, 18, 0, Math.PI * 2); sctx.stroke();
-    sctx.shadowBlur = 0;
-
-    // 另一只手五指指尖 → 连线到这个点
     if (list[1]) {
       sctx.strokeStyle = CYAN + '.9)'; sctx.lineWidth = 2.4;
       sctx.shadowColor = CYAN + '1)'; sctx.shadowBlur = 16;
       for (const i of [4, 8, 12, 16, 20]) {
         const q = pt(list[1][i]);
         sctx.beginPath(); sctx.moveTo(q.x, q.y); sctx.lineTo(c.x, c.y); sctx.stroke();
-        sctx.fillStyle = PINK + '.95)';
-        sctx.beginPath(); sctx.arc(q.x, q.y, 4.2, 0, Math.PI * 2); sctx.fill();
       }
       sctx.shadowBlur = 0;
     }
@@ -479,10 +444,7 @@ function drawSkeleton(list, hasPoint) {
     sctx.lineTo(p[2].x, p[2].y); sctx.lineTo(p[3].x, p[3].y);
     sctx.closePath(); sctx.stroke();
     sctx.shadowBlur = 0;
-    for (const q of p) {
-      sctx.fillStyle = PINK + '.95)';
-      sctx.beginPath(); sctx.arc(q.x, q.y, 5.4, 0, Math.PI * 2); sctx.fill();
-    }
+    // 顶点不画圆点
   }
 }
 
@@ -833,24 +795,7 @@ function drawFanUI(apex, tips, t) {
   }
   sctx.setLineDash([]);
 
-  // 汇聚点：高亮大圆
-  sctx.shadowColor = 'rgba(255,92,200,1)'; sctx.shadowBlur = 32;
-  sctx.fillStyle = 'rgba(255,92,200,.98)';
-  sctx.beginPath(); sctx.arc(apex.x, apex.y, 12, 0, Math.PI * 2); sctx.fill();
-  sctx.strokeStyle = 'rgba(180,245,255,.95)'; sctx.lineWidth = 2.6;
-  sctx.beginPath(); sctx.arc(apex.x, apex.y, 21, 0, Math.PI * 2); sctx.stroke();
-  sctx.shadowBlur = 0;
-
-  // 五个指尖节点
-  for (let i = 0; i < tips.length; i++) {
-    const q = tips[i];
-    sctx.fillStyle = 'rgba(255,92,200,.95)';
-    sctx.shadowColor = 'rgba(255,92,200,1)'; sctx.shadowBlur = 20;
-    sctx.beginPath(); sctx.arc(q.x, q.y, 6, 0, Math.PI * 2); sctx.fill();
-    sctx.shadowBlur = 0;
-    sctx.strokeStyle = 'rgba(57,230,255,.9)'; sctx.lineWidth = 2;
-    sctx.beginPath(); sctx.arc(q.x, q.y, 11, 0, Math.PI * 2); sctx.stroke();
-  }
+  // 汇聚点与指尖：只保留辐射线与三角形，不画圆点
 
   // 二进制数字反馈
   sctx.font = '700 14px Consolas, monospace';
