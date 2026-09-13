@@ -717,15 +717,31 @@ function curlScore(lm) {
   const worst = scores[0], avg = (scores[0] + scores[1] + scores[2]) / 3;
   return clamp01(worst * 0.45 + avg * 0.55);
 }
-/* 食指与拇指必须"明显伸开"才允许四边形 */
+/* ===== 逐指伸展判定（四边形的核心条件） =====
+   返回每根手指是否"伸直"：伸直时指尖离掌心的距离显著大于第一指节
+   用 3D 距离，手掌转动时依然稳定 */
+function fingerStraight(lm, tip, pip) {
+  const palm = palmOf(lm);
+  const dTip = d3(lm[tip], palm);
+  const dPip = d3(lm[pip], palm);
+  // 伸直：指尖明显比第二关节远离掌心（比值 > 1.25）
+  return (dTip / (dPip + 1e-6)) > 1.25;
+}
+/* 食指(8/6) 与 拇指(4/2) 是否都伸直 */
 function indexThumbClearlyOpen(lm) {
-  // 用「指尖 vs 该指第二关节」的伸展比：伸直时指尖明显更远离掌指关节
-  // 食指：指尖(8) 对比 pip(6)；拇指：指尖(4) 对比 mcp(2)
-  const idxRatio = d2(lm[8], lm[5]) / (d2(lm[6], lm[5]) + 1e-6);   // 指尖相对食指根
-  const thumbRatio = d2(lm[4], lm[2]) / (d2(lm[3], lm[2]) + 1e-6); // 指尖相对拇指根
-  lm.__idxR = idxRatio; lm.__thumbR = thumbRatio;
-  // 要求食指、拇指明显伸直（原 1.25/1.05 太松，改为 1.55/1.25）
-  return idxRatio > 1.55 && thumbRatio > 1.25;
+  const idxStraight = fingerStraight(lm, 8, 6);
+  const thumbStraight = fingerStraight(lm, 4, 2);
+  lm.__idxOpen = idxStraight;
+  lm.__thumbOpen = thumbStraight;
+  return idxStraight && thumbStraight;
+}
+/* 中指(12/10)、无名指(16/14)、小指(20/18) 是否都弯曲收紧 */
+function othersReallyCurled(lm) {
+  const a = !fingerStraight(lm, 12, 10);
+  const b = !fingerStraight(lm, 16, 14);
+  const c = !fingerStraight(lm, 20, 18);
+  lm.__curlCnt = (a ? 1 : 0) + (b ? 1 : 0) + (c ? 1 : 0);
+  return a && b && c;
 }
 const CURL_ON = 0.55, CURL_OFF = 0.35;
 function isOthersCurled(lm) {
@@ -1358,13 +1374,15 @@ function onHands(list) {
   /* ========== 【优先级1】四边形抠洞 ==========
      条件更严格（两手都要摆姿势），所以必须先判定，否则会被扇形抢走 */
   if (list.length >= 2) {
-    // 双重严格条件：① 其余三指收紧  ② 食指+拇指确实伸直
+    /* ===== 四边形严格判定（逐指验证）=====
+       每只手必须：食指伸直 + 拇指伸直 + 中指/无名指/小指全部弯曲 */
     const curls0 = list.map((lm, i) => (lm.__curl = smoothScore('curl', i, curlScore(lm))));
     const opens0 = list.map(lm => indexThumbClearlyOpen(lm));
+    const curled0 = list.map(lm => othersReallyCurled(lm));
     list.forEach((lm, i) => { lm.__open3 = opens0[i] ? 1 : 0; });
-    // 已处于四边形时略放宽，避免抖动掉出；否则必须严格
-    const curlNeed0 = (mode === 'rect') ? CURL_ON - 0.10 : CURL_ON;
-    const strictOk = curls0.every(c => c >= curlNeed0) && opens0.every(v => v);
+    // 已在四边形中时，仅放宽收拢分（手指状态仍须正确）
+    const curlNeed0 = (mode === 'rect') ? CURL_ON - 0.12 : CURL_ON;
+    const strictOk = curls0.every(c => c >= curlNeed0) && opens0.every(v => v) && curled0.every(v => v);
     if (strictOk) {
       const a = list[0], b = list[1];
       const g = computeRectGeo(a, b);
@@ -2111,6 +2129,7 @@ function loop() {
       ' 张开 ' + lastList.map(l => tagNum(l.__spread, SPREAD_ON)).join(' ') +
       ' 收拢 ' + lastList.map(l => tagNum(l.__curl, CURL_ON)).join(' ') +
       ' 开指 ' + lastList.map(l => (l.__open3 ? 'Y' : 'N')).join(' ') +
+      ' 卷指 ' + lastList.map(l => (l.__curlCnt === undefined ? '-' : l.__curlCnt + '/3')).join(' ') +
       ' 伸开 ' + lastList.map(l => {
         if (!l[4]) return '-';
         // 实时算一次，确保面板显示的就是判定用的值
