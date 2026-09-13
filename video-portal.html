@@ -138,7 +138,7 @@
   #bin .lbl{color:#39e6ff;font-size:9px;display:block;margin-bottom:4px}
 
   /* 骨架开关关闭态 */
-  #skelBtn.off{opacity:.55;border-color:rgba(120,150,180,.5);color:#8aa4bd;
+  #skelBtn.off,#binBtn.off{opacity:.55;border-color:rgba(120,150,180,.5);color:#8aa4bd;
     background:linear-gradient(180deg,rgba(26,36,52,.7),rgba(12,18,30,.85))}
 
   /* ---------- 录制 ---------- */
@@ -251,6 +251,7 @@
   <button id="exitFull" style="display:none">退出全屏</button>
   <button id="rec">开始录制</button>
   <button id="skelBtn">骨架线：开</button>
+  <button id="binBtn">二进制：开</button>
 </div>
 <div id="recDot"><span></span>REC <b id="recTime">00:00</b></div>
 <input id="file" type="file" accept="video/*" style="display:none">
@@ -293,6 +294,7 @@ let reveal = 0, targetReveal = 0;   // 0..1 洞的张开度
 let fullMix = 0, targetFull = 0;    // 0..1 全屏混合
 let lastList = [];
 let SHOW_SKELETON = true;   // 骨架节点线显示开关
+let SHOW_BINARY = true;     // 二进制数字特效开关
 let holdList = [], holdAt = 0;   // 丢帧保持用
 let lastVideoTime = -1;           // 视频时间戳，用于跳过重复绘制
 let liveQuad = null;   // 当前四边形四点（屏幕坐标）
@@ -424,24 +426,14 @@ function drawSkeleton(list, hasPoint) {
       sctx.beginPath(); sctx.arc(q.x, q.y, 1.8, 0, Math.PI * 2); sctx.fill();
     }
 
-    // 其余三指：常规显示
-    for (const i of [12, 16, 20]) {
-      const q = pt(lm[i]);
-      sctx.fillStyle = CYAN + '.7)';
-      sctx.beginPath(); sctx.arc(q.x, q.y, 3.6, 0, Math.PI * 2); sctx.fill();
-    }
-
-    // 四个关键点：食指(8) 与 拇指(4)，用粉色高亮加光环
+    // 两个关键点：食指(8) 与 拇指(4) —— 只画实心点，不画圆环
     for (const i of [4, 8]) {
       const q = pt(lm[i]);
-      sctx.shadowColor = PINK + '1)'; sctx.shadowBlur = 26;
-      sctx.fillStyle = PINK + '.98)';
-      sctx.beginPath(); sctx.arc(q.x, q.y, 7, 0, Math.PI * 2); sctx.fill();
-      sctx.strokeStyle = CYAN + '.95)'; sctx.lineWidth = 2.2;
-      sctx.beginPath(); sctx.arc(q.x, q.y, 13, 0, Math.PI * 2); sctx.stroke();
+      sctx.shadowColor = PINK + '1)'; sctx.shadowBlur = 18;
+      sctx.fillStyle = PINK + '.95)';
+      sctx.beginPath(); sctx.arc(q.x, q.y, 5, 0, Math.PI * 2); sctx.fill();
       sctx.shadowBlur = 0;
     }
-    sctx.shadowBlur = 0;
   });
 
   // 单点：五指汇聚成一个发光圆点
@@ -450,8 +442,6 @@ function drawSkeleton(list, hasPoint) {
     sctx.shadowColor = PINK + '1)'; sctx.shadowBlur = 30;
     sctx.fillStyle = PINK + '.95)';
     sctx.beginPath(); sctx.arc(c.x, c.y, 10, 0, Math.PI * 2); sctx.fill();
-    sctx.strokeStyle = CYAN + '.9)'; sctx.lineWidth = 2.4;
-    sctx.beginPath(); sctx.arc(c.x, c.y, 18, 0, Math.PI * 2); sctx.stroke();
     sctx.shadowBlur = 0;
 
     // 另一只手五指指尖 → 连线到这个点
@@ -522,7 +512,7 @@ refreshBinTags();
 
 function drawBinaryUI(p, t) {
   if (!p || p.length !== 4) return;
-  if (!SHOW_SKELETON) return;   // 与骨架线共用同一个开关
+  if (!SHOW_BINARY) return;   // 独立的二进制特效开关
   // 低性能设备简化数字层
   const simple = PERF.level <= 1;
   binPhase += 0.016;
@@ -790,7 +780,7 @@ let fanTips = [];
 
 function drawFanUI(apex, tips, t) {
   if (!apex || !tips || tips.length < 5) return;
-  if (!SHOW_SKELETON) return;   // 与骨架线共用同一个开关
+  if (!SHOW_SKELETON) return;   // 跟随骨架线开关
   sctx.save();
 
   for (let i = 0; i < 4; i++) {
@@ -861,6 +851,36 @@ function drawFanUI(apex, tips, t) {
     const px = q.x + nx / nl * 30, py = q.y + ny / nl * 30;
     sctx.fillStyle = 'rgba(180,245,255,.95)';
     sctx.fillText(_binStream[i % _binStream.length], px, py);
+  }
+  sctx.restore();
+}
+
+/* 扇形模式下的二进制数字：跟随五个指尖 */
+function drawFanBinary(apex, tips, t) {
+  if (!apex || tips.length < 5) return;
+  sctx.save();
+  sctx.font = '700 15px Consolas, monospace';
+  sctx.textAlign = 'center';
+  sctx.textBaseline = 'middle';
+  const seeds = ['1210100', '1410100', '1010100', '0110100', '1101001'];
+  for (let i = 0; i < tips.length; i++) {
+    const q = tips[i];
+    const nx = q.x - apex.x, ny = q.y - apex.y;
+    const nl = Math.hypot(nx, ny) || 1;
+    const dist = 34 + Math.sin(t / 400 + i) * 5;
+    const px = q.x + nx / nl * dist;
+    const py = q.y + ny / nl * dist;
+    // 引线
+    sctx.strokeStyle = 'rgba(255,92,200,.5)';
+    sctx.lineWidth = 1.3;
+    sctx.beginPath(); sctx.moveTo(q.x, q.y); sctx.lineTo(px, py); sctx.stroke();
+    // 数字
+    const isCyan = i % 2 === 0;
+    sctx.shadowColor = isCyan ? 'rgba(57,230,255,1)' : 'rgba(255,92,200,1)';
+    sctx.shadowBlur = 18;
+    sctx.fillStyle = isCyan ? 'rgba(190,245,255,.98)' : 'rgba(255,200,240,.98)';
+    sctx.fillText(seeds[i], px, py);
+    sctx.shadowBlur = 0;
   }
   sctx.restore();
 }
@@ -1683,6 +1703,13 @@ function stopRecording() {
 $('#rec').addEventListener('click', () => { recorder ? stopRecording() : startRecording(); });
 
 /* ---------- 骨架节点线开关 ---------- */
+/* ---------- 二进制特效开关 ---------- */
+$('#binBtn').addEventListener('click', () => {
+  SHOW_BINARY = !SHOW_BINARY;
+  $('#binBtn').textContent = '二进制：' + (SHOW_BINARY ? '开' : '关');
+  $('#binBtn').classList.toggle('off', !SHOW_BINARY);
+});
+
 $('#skelBtn').addEventListener('click', () => {
   SHOW_SKELETON = !SHOW_SKELETON;
   $('#skelBtn').textContent = '骨架线：' + (SHOW_SKELETON ? '开' : '关');
@@ -1999,8 +2026,12 @@ function loop() {
       drawFanUI(fanApex, fanTips, performance.now());
     }
     // 二进制数字交互反馈：四边形模式下跟随四点移动
-    if (liveQuad && liveQuad.length === 4) {
+    if (SHOW_BINARY && liveQuad && liveQuad.length === 4) {
       drawBinaryUI(liveQuad, performance.now());
+    }
+    // 扇形模式下也绘制二进制数字（跟随五指）
+    if (SHOW_BINARY && mode === 'fan' && fanTips.length === 5) {
+      drawFanBinary(fanApex, fanTips, performance.now());
     }
   }
   drawHexGrid();
