@@ -1354,8 +1354,59 @@ function onHands(list) {
   missCount = 0;
   lastSeen = now;
 
-  // 【最高优先级】扇形模式：一只手五指攥紧=一个点，另一只手五指张开
-  // 点与五个指尖辐射连线，相邻两线夹出 4 个三角形，各施加一种滤镜
+  /* ========== 【优先级1】四边形抠洞 ==========
+     条件更严格（两手都要摆姿势），所以必须先判定，否则会被扇形抢走 */
+  if (list.length >= 2) {
+    const curls0 = list.map((lm, i) => (lm.__curl = smoothScore('curl', i, curlScore(lm))));
+    const curlNeed0 = (mode === 'rect') ? CURL_ON - 0.18 : CURL_ON;
+    if (curls0.every(c => c >= curlNeed0)) {
+      const a = list[0], b = list[1];
+      const g = computeRectGeo(a, b);
+      rect = g;
+      if (!smoothRect) smoothRect = { cx: g.cx, cy: g.cy, area: g.area, pts: g.pts.map(q => ({ x: q.x, y: q.y })) };
+      else {
+        const k = 0.45;
+        smoothRect.cx += (g.cx - smoothRect.cx) * k;
+        smoothRect.cy += (g.cy - smoothRect.cy) * k;
+        smoothRect.area += (g.area - smoothRect.area) * k;
+        for (let i = 0; i < 4; i++) {
+          smoothRect.pts[i].x += (g.pts[i].x - smoothRect.pts[i].x) * k;
+          smoothRect.pts[i].y += (g.pts[i].y - smoothRect.pts[i].y) * k;
+        }
+      }
+      enterMode('rect');
+      rectHoldFrames = 20;
+      pointPos = null;
+      liveQuad = smoothRect.pts;
+      const q2 = smoothRect.pts;
+      let minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
+      for (const p of q2) {
+        if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+        if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+      }
+      const bw = Math.max(0, Math.min(CANVAS_W, maxX) - Math.max(0, minX));
+      const bh = Math.max(0, Math.min(CANVAS_H, maxY) - Math.max(0, minY));
+      const area0 = Math.min(bw / CANVAS_W, bh / CANVAS_H);
+      targetReveal = 1;
+      lastArea = area0;
+      fanTriangles = []; fanLastTri = [];
+      if (!isFull) {
+        if (area0 >= FULL_THRESHOLD) {
+          isFull = true; targetFull = 1; glitch();
+          fullAnim = 0;
+          fullAnimFrom = liveQuad.map(p => ({ x: p.x, y: p.y }));
+          fullAnimTarget = [{ x: 0, y: 0 }, { x: CANVAS_W, y: 0 }, { x: CANVAS_W, y: CANVAS_H }, { x: 0, y: CANVAS_H }];
+          startPlayback();
+          setState('FULL / 全屏播放', '已进入全屏', 'full');
+        } else {
+          setState('RECT / 抠洞 ' + Math.round(area0 * 100) + '%', '三点收紧 · 食指拇指构成四边形', 'live');
+        }
+      }
+      return;
+    }
+  }
+
+  // 【优先级2】扇形模式：一只手攥拳=一个点，另一只手五指张开
   if (list.length >= 2) {
     // 策略：找到「最像攥拳」的那只手作为点，另一只手直接作为张开的五指
     // —— 不再要求张开手达标，只要它比攥拳手更像张开即可（手掌转向也稳定）
@@ -1422,14 +1473,8 @@ function onHands(list) {
     }
   }
 
-  // 四边形模式：两手「其余六指全部收紧」即触发（食指拇指自然张开用于取框角）
-  const curls = list.map((lm, i) => (lm.__curl = smoothScore('curl', i, curlScore(lm))));
-  const opens = list.map(lm => (lm.__open3 = indexThumbClearlyOpen(lm) ? 1 : 0));
-  const opensOk = list.map(lm => indexThumbClearlyOpen(lm));
-  // 判定：两只手的其余三指收拢即可（食指拇指自然呈现框角，不强求"明显伸开"）
-  const curlNeed = (mode === 'rect') ? CURL_ON - 0.15 : CURL_ON;
-  const bothCurled = list.length >= 2 && curls.every(c => c >= curlNeed);
-  if (bothCurled && confirmMode('rect') && canSwitch('rect')) {
+  // 四边形已在上面优先处理；这里只保留「维持/退出」逻辑
+  if (false) {
     const a = list[0], b = list[1];
     const g = computeRectGeo(a, b);
     rect = g;
