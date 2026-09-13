@@ -724,9 +724,10 @@ function indexThumbClearlyOpen(lm) {
   const idxRatio = d2(lm[8], lm[5]) / (d2(lm[6], lm[5]) + 1e-6);   // 指尖相对食指根
   const thumbRatio = d2(lm[4], lm[2]) / (d2(lm[3], lm[2]) + 1e-6); // 指尖相对拇指根
   lm.__idxR = idxRatio; lm.__thumbR = thumbRatio;
-  return idxRatio > 1.25 && thumbRatio > 1.05;
+  // 要求食指、拇指明显伸直（原 1.25/1.05 太松，改为 1.55/1.25）
+  return idxRatio > 1.55 && thumbRatio > 1.25;
 }
-const CURL_ON = 0.38, CURL_OFF = 0.25;
+const CURL_ON = 0.55, CURL_OFF = 0.35;
 function isOthersCurled(lm) {
   const s = curlScore(lm);
   lm.__curl = s;
@@ -1357,9 +1358,14 @@ function onHands(list) {
   /* ========== 【优先级1】四边形抠洞 ==========
      条件更严格（两手都要摆姿势），所以必须先判定，否则会被扇形抢走 */
   if (list.length >= 2) {
+    // 双重严格条件：① 其余三指收紧  ② 食指+拇指确实伸直
     const curls0 = list.map((lm, i) => (lm.__curl = smoothScore('curl', i, curlScore(lm))));
-    const curlNeed0 = (mode === 'rect') ? CURL_ON - 0.18 : CURL_ON;
-    if (curls0.every(c => c >= curlNeed0)) {
+    const opens0 = list.map(lm => indexThumbClearlyOpen(lm));
+    list.forEach((lm, i) => { lm.__open3 = opens0[i] ? 1 : 0; });
+    // 已处于四边形时略放宽，避免抖动掉出；否则必须严格
+    const curlNeed0 = (mode === 'rect') ? CURL_ON - 0.10 : CURL_ON;
+    const strictOk = curls0.every(c => c >= curlNeed0) && opens0.every(v => v);
+    if (strictOk) {
       const a = list[0], b = list[1];
       const g = computeRectGeo(a, b);
       rect = g;
