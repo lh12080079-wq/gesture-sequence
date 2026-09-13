@@ -138,7 +138,7 @@
   #bin .lbl{color:#39e6ff;font-size:9px;display:block;margin-bottom:4px}
 
   /* 骨架开关关闭态 */
-  #skelBtn.off,#binBtn.off{opacity:.55;border-color:rgba(120,150,180,.5);color:#8aa4bd;
+  #skelBtn.off{opacity:.55;border-color:rgba(120,150,180,.5);color:#8aa4bd;
     background:linear-gradient(180deg,rgba(26,36,52,.7),rgba(12,18,30,.85))}
 
   /* ---------- 录制 ---------- */
@@ -251,7 +251,6 @@
   <button id="exitFull" style="display:none">退出全屏</button>
   <button id="rec">开始录制</button>
   <button id="skelBtn">骨架线：开</button>
-  <button id="binBtn">二进制：开</button>
 </div>
 <div id="recDot"><span></span>REC <b id="recTime">00:00</b></div>
 <input id="file" type="file" accept="video/*" style="display:none">
@@ -294,7 +293,6 @@ let reveal = 0, targetReveal = 0;   // 0..1 洞的张开度
 let fullMix = 0, targetFull = 0;    // 0..1 全屏混合
 let lastList = [];
 let SHOW_SKELETON = true;   // 骨架节点线显示开关
-let SHOW_BINARY = true;     // 二进制数字特效开关
 let holdList = [], holdAt = 0;   // 丢帧保持用
 let lastVideoTime = -1;           // 视频时间戳，用于跳过重复绘制
 let liveQuad = null;   // 当前四边形四点（屏幕坐标）
@@ -401,10 +399,9 @@ function isFist(lm) {
 
 /* ---------- 骨架绘制 ---------- */
 function drawSkeleton(list, hasPoint) {
+  if (!SHOW_SKELETON) return;   // 骨架线开关关闭时跳过
   resizeSkel();
-  // 无论开关如何，都要清空画布，否则会残留痕迹
   sctx.clearRect(0, 0, skel.width, skel.height);
-  if (!SHOW_SKELETON) return;
   if (!list.length) return;
   const pt = p => ({ x: (1 - p.x) * CANVAS_W, y: p.y * CANVAS_H });
   sctx.lineCap = 'round';
@@ -419,12 +416,43 @@ function drawSkeleton(list, hasPoint) {
     }
     sctx.shadowBlur = 0;
 
-    // 不再绘制任何圆点，只保留骨架连线
+    // 非关键关节：淡化的小点
+    sctx.fillStyle = CYAN + '.45)';
+    for (let i = 0; i < lm.length; i++) {
+      if ([4, 8, 12, 16, 20].includes(i)) continue;
+      const q = pt(lm[i]);
+      sctx.beginPath(); sctx.arc(q.x, q.y, 1.8, 0, Math.PI * 2); sctx.fill();
+    }
+
+    // 其余三指：常规显示
+    for (const i of [12, 16, 20]) {
+      const q = pt(lm[i]);
+      sctx.fillStyle = CYAN + '.7)';
+      sctx.beginPath(); sctx.arc(q.x, q.y, 3.6, 0, Math.PI * 2); sctx.fill();
+    }
+
+    // 四个关键点：食指(8) 与 拇指(4)，用粉色高亮加光环
+    for (const i of [4, 8]) {
+      const q = pt(lm[i]);
+      sctx.shadowColor = PINK + '1)'; sctx.shadowBlur = 26;
+      sctx.fillStyle = PINK + '.98)';
+      sctx.beginPath(); sctx.arc(q.x, q.y, 7, 0, Math.PI * 2); sctx.fill();
+      sctx.strokeStyle = CYAN + '.95)'; sctx.lineWidth = 2.2;
+      sctx.beginPath(); sctx.arc(q.x, q.y, 13, 0, Math.PI * 2); sctx.stroke();
+      sctx.shadowBlur = 0;
+    }
+    sctx.shadowBlur = 0;
   });
 
-  // 单点：只在另一只手存在时连线，不画任何圆点
+  // 单点：五指汇聚成一个发光圆点
   if (hasPoint && list[0]) {
     const c = pt(list[0][9]);
+    sctx.shadowColor = PINK + '1)'; sctx.shadowBlur = 30;
+    sctx.fillStyle = PINK + '.95)';
+    sctx.beginPath(); sctx.arc(c.x, c.y, 10, 0, Math.PI * 2); sctx.fill();
+    sctx.strokeStyle = CYAN + '.9)'; sctx.lineWidth = 2.4;
+    sctx.beginPath(); sctx.arc(c.x, c.y, 18, 0, Math.PI * 2); sctx.stroke();
+    sctx.shadowBlur = 0;
 
     // 另一只手五指指尖 → 连线到这个点
     if (list[1]) {
@@ -433,6 +461,8 @@ function drawSkeleton(list, hasPoint) {
       for (const i of [4, 8, 12, 16, 20]) {
         const q = pt(list[1][i]);
         sctx.beginPath(); sctx.moveTo(q.x, q.y); sctx.lineTo(c.x, c.y); sctx.stroke();
+        sctx.fillStyle = PINK + '.95)';
+        sctx.beginPath(); sctx.arc(q.x, q.y, 4.2, 0, Math.PI * 2); sctx.fill();
       }
       sctx.shadowBlur = 0;
     }
@@ -451,7 +481,7 @@ function drawSkeleton(list, hasPoint) {
     sctx.shadowBlur = 0;
     for (const q of p) {
       sctx.fillStyle = PINK + '.95)';
-      // 顶点不画圆点
+      sctx.beginPath(); sctx.arc(q.x, q.y, 5.4, 0, Math.PI * 2); sctx.fill();
     }
   }
 }
@@ -492,7 +522,7 @@ refreshBinTags();
 
 function drawBinaryUI(p, t) {
   if (!p || p.length !== 4) return;
-  if (!SHOW_BINARY) return;   // 独立的二进制特效开关
+  if (!SHOW_SKELETON) return;   // 与骨架线共用同一个开关
   // 低性能设备简化数字层
   const simple = PERF.level <= 1;
   binPhase += 0.016;
@@ -596,21 +626,16 @@ function randBinCached(i) { return _binStream[i % _binStream.length]; }
 function clenchScore(lm) {
   const palm = palmOf(lm), r = scaleOf(lm);
   const TIPS = [4, 8, 12, 16, 20];
-  /* ⓪ 攥拳前提：食指/中指/无名指/小指 至少三根明确弯曲
-     —— 只收三指做四边形时，食指是伸直的，这里会拦截，避免混淆 */
-  const curledN = [ [5,6,8], [9,10,12], [13,14,16], [17,18,20] ]
-    .filter(([m,p,t]) => fingerCurled(lm, m, p, t)).length;
-  if (curledN < 3) return 0;
-  // ① 每个指尖到掌心的平均距离（用 3D，手掌转向时依然稳定）
+  // ① 每个指尖到掌心的平均距离（越小越像攥拳）
   let nearSum = 0;
-  for (const i of TIPS) nearSum += Math.min(1.8, d3(lm[i], palm) / r);
-  const nearAvg = nearSum / TIPS.length;
-  const nearScore = clamp01((1.65 - nearAvg) / 0.8);
+  for (const i of TIPS) nearSum += Math.min(1.6, d2(lm[i], palm) / r);
+  const nearAvg = nearSum / TIPS.length;              // ~0.6 攥紧, ~2.0 张开
+  const nearScore = clamp01((1.55 - nearAvg) / 0.75); // 放宽：更容易判为攥紧
   // ② 指尖之间的紧凑度
   let maxd = 0;
   for (let i = 0; i < TIPS.length; i++)
     for (let j = i + 1; j < TIPS.length; j++)
-      maxd = Math.max(maxd, d3(lm[TIPS[i]], lm[TIPS[j]]) / r);
+      maxd = Math.max(maxd, d2(lm[TIPS[i]], lm[TIPS[j]]) / r);
   const tightScore = clamp01((1.9 - maxd) / 1.1);
   // ③ 指尖到掌心的平均 z 深度（攥拳时更贴近掌心平面）
   let zSum = 0;
@@ -621,9 +646,9 @@ function clenchScore(lm) {
   const FINGERS = [[8, 6], [12, 10], [16, 14], [20, 18]];  // [指尖, pip]
   let bendSum = 0;
   for (const [tip, pip] of FINGERS) {
-    const dTip = d3(lm[tip], palm), dPip = d3(lm[pip], palm);
-    // 指尖比 pip 更靠近掌心 → 弯曲（用 3D 抗朝向变化）
-    bendSum += clamp01((dPip - dTip) / (dPip * 0.5 + 1e-6));
+    const dTip = d2(lm[tip], palm), dPip = d2(lm[pip], palm);
+    // 指尖比 pip 更靠近掌心 → 弯曲；比值越小弯曲越充分
+    bendSum += clamp01((dPip - dTip) / (dPip * 0.55 + 1e-6));
   }
   const curlScore2 = clamp01(bendSum / FINGERS.length);
   // ⑤ 拇指是否内收（拇指尖靠近食指根）
@@ -662,20 +687,17 @@ function tagNum(v, need) {
 }
 
 /* 滞回：进入需 ≥ ON，退出需 < OFF，避免临界抖动 */
-const CLENCH_ON = 0.40, CLENCH_OFF = 0.22;
+const CLENCH_ON = 0.45, CLENCH_OFF = 0.28;
 const SPREAD_ON = 0.40, SPREAD_OFF = 0.24;
 let clenchLatched = false, spreadLatched = false;
 let fanHoldFrames = 0;   // 扇形保持帧数，容忍短暂丢失
 let fanLastTri = [];     // 上次的三角形，保持期内沿用避免闪烁
-let rectHoldFrames = 0;  // 四边形保持帧数
 let fanAlpha = 0;        // 滤镜淡入淡出，避免瞬间消失
 /* 分数的时间平滑：历史队列取平均，避免单帧波动 */
 const scoreHist = { clench: [[], []], spread: [[], []], curl: [[], []] };
 function smoothScore(kind, idx, v) {
   const q = scoreHist[kind][idx] || (scoreHist[kind][idx] = []);
-  // 窗口按类型区分：收拢/张开需快速响应，握拳需稳定
-  const win = (kind === 'curl') ? 2 : (kind === 'clench' ? 6 : 4);
-  q.push(v); if (q.length > win) q.shift();
+  q.push(v); if (q.length > 4) q.shift();
   let s = 0; for (const x of q) s += x;
   return s / q.length;
 }
@@ -692,71 +714,33 @@ function confirmMode(next) {
 /* 四边形模式专用：一只手的"其余三指"必须收紧
    食指(8)与拇指(4)用来构成框角，中指(12)/无名指(16)/小指(20)必须收拢 */
 /* 严格收拢判定：三指必须"真的弯下去"，光靠近不够 */
-/* 收拢分：用「指尖/第二关节 相对指根」的比值，与 fingerStraight 同一套几何 */
 function curlScore(lm) {
-  const FINGERS = [[9, 10, 12], [13, 14, 16], [17, 18, 20]];
-  const scores = FINGERS.map(([mcp, pip, tip]) => {
-    // 用平面与深度的较小比值（更倾向判定为弯曲，正对摄像头时也更稳）
-    const r2 = d2(lm[tip], lm[mcp]) / (d2(lm[pip], lm[mcp]) + 1e-6);
-    const r3 = d3(lm[tip], lm[mcp]) / (d3(lm[pip], lm[mcp]) + 1e-6);
-    const ratio = Math.min(r2, r3);
-    // 比值越小 → 弯曲越充分 → 分越高（曲线放宽，让收拢分更容易达标）
-    return clamp01((2.10 - ratio) / 0.95);
+  const palm = palmOf(lm), r = scaleOf(lm);
+  const FINGERS = [[12, 10], [16, 14], [20, 18]];   // [指尖, 第二指节]
+  const scores = FINGERS.map(([tip, pip]) => {
+    const dTip = d3(lm[tip], palm) / r;
+    const dPip = d3(lm[pip], palm) / r;
+    // ① 指尖靠近掌心（放宽：阈值放到 2.0，正常收拢约 1.0~1.4）
+    const near = clamp01((2.25 - dTip) / 0.95);
+    // ② 指尖比第二指节更靠近掌心 = 真的弯曲
+    const bent = clamp01((dPip - dTip) / (dPip * 0.30 + 1e-6));
+    return near * 0.5 + bent * 0.5;
   });
+  // 最小值主导但不极端，兼顾"都要收紧"和容错
   scores.sort((a, b) => a - b);
   const worst = scores[0], avg = (scores[0] + scores[1] + scores[2]) / 3;
   return clamp01(worst * 0.45 + avg * 0.55);
 }
-/* ===== 逐指伸展判定（四边形的核心条件） =====
-   返回每根手指是否"伸直"：伸直时指尖离掌心的距离显著大于第一指节
-   用 3D 距离，手掌转动时依然稳定 */
-/* 用「指尖到掌指关节」与「第二关节到掌指关节」的比值判定
-   —— 基准点取该手指自己的根部(mcp)，比用掌心稳定得多 */
-/* 手指数值：用「指尖/第二关节 到指根」的比值。
-   关键：平面(d2)比值在手掌正对摄像头时最准；深度(d3)比值在手侧对时最准。
-   两者取"更保守"的组合 —— 伸直看 d2（更可靠），弯曲看 d3 */
-function fingerRatio(lm, mcp, pip, tip) {
-  const dm2 = d2(lm[tip], lm[mcp]), dp2 = d2(lm[pip], lm[mcp]);
-  const dm3 = d3(lm[tip], lm[mcp]), dp3 = d3(lm[pip], lm[mcp]);
-  const r2 = dm2 / (dp2 + 1e-6);
-  const r3 = dm3 / (dp3 + 1e-6);
-  // 手掌正对摄像头（z 抖动大）时以 d2 为主；侧对时以 d3 为主
-  return { r2, r3, p2: dp2 / (dp2 + dp3 + 1e-6) };
-}
-/* 伸直判定：用凌晨版验证过的平面比值阈值（食指 1.55 / 其他 1.30） */
-function fingerStraight(lm, mcp, pip, tip) {
-  const { r2 } = fingerRatio(lm, mcp, pip, tip);
-  // 食指用较严的 1.55，其余手指用 1.30
-  const need = (mcp === 5) ? 1.55 : 1.30;
-  return r2 > need;
-}
-/* 弯曲判定：平面比值明显小于伸直阈值即算弯曲 */
-function fingerCurled(lm, mcp, pip, tip) {
-  const { r2 } = fingerRatio(lm, mcp, pip, tip);
-  return r2 < 1.30;
-}
-/* 食指(8/6) 与 拇指(4/2) 是否都伸直 */
+/* 食指与拇指必须"明显伸开"才允许四边形 */
 function indexThumbClearlyOpen(lm) {
-  // 直接用凌晨版验证过的公式（纯平面比值，正对摄像头最可靠）
-  const idxRatio = d2(lm[8], lm[5]) / (d2(lm[6], lm[5]) + 1e-6);
-  const thumbRatio = d2(lm[4], lm[2]) / (d2(lm[3], lm[2]) + 1e-6);
+  // 用「指尖 vs 该指第二关节」的伸展比：伸直时指尖明显更远离掌指关节
+  // 食指：指尖(8) 对比 pip(6)；拇指：指尖(4) 对比 mcp(2)
+  const idxRatio = d2(lm[8], lm[5]) / (d2(lm[6], lm[5]) + 1e-6);   // 指尖相对食指根
+  const thumbRatio = d2(lm[4], lm[2]) / (d2(lm[3], lm[2]) + 1e-6); // 指尖相对拇指根
   lm.__idxR = idxRatio; lm.__thumbR = thumbRatio;
-  const idxStraight = idxRatio > 1.55;
-  const thumbStraight = thumbRatio > 1.25;
-  lm.__idxOpen = idxStraight;
-  lm.__thumbOpen = thumbStraight;
-  return idxStraight && thumbStraight;
+  return idxRatio > 1.55 && thumbRatio > 1.25;
 }
-/* 中指(12/10)、无名指(16/14)、小指(20/18) 是否都弯曲收紧 */
-function othersReallyCurled(lm) {
-  // 中指 根9→10→12 ; 无名指 根13→14→16 ; 小指 根17→18→20
-  const a = fingerCurled(lm, 9, 10, 12);
-  const b = fingerCurled(lm, 13, 14, 16);
-  const c = fingerCurled(lm, 17, 18, 20);
-  lm.__curlCnt = (a ? 1 : 0) + (b ? 1 : 0) + (c ? 1 : 0);
-  return a && b && c;
-}
-const CURL_ON = 0.42, CURL_OFF = 0.25;
+const CURL_ON = 0.48, CURL_OFF = 0.32;
 function isOthersCurled(lm) {
   const s = curlScore(lm);
   lm.__curl = s;
@@ -806,7 +790,7 @@ let fanTips = [];
 
 function drawFanUI(apex, tips, t) {
   if (!apex || !tips || tips.length < 5) return;
-  if (!SHOW_SKELETON) return;   // 跟随骨架线开关
+  if (!SHOW_SKELETON) return;   // 与骨架线共用同一个开关
   sctx.save();
 
   for (let i = 0; i < 4; i++) {
@@ -819,7 +803,8 @@ function drawFanUI(apex, tips, t) {
     sctx.lineTo(A.x, A.y);
     sctx.lineTo(B.x, B.y);
     sctx.closePath();
-    // 不填充，只描边（避免出现暗色块/黑点）
+    sctx.fillStyle = col + '0.06)';
+    sctx.fill();
 
     // 三角形边框
     sctx.strokeStyle = col + '0.85)';
@@ -848,6 +833,24 @@ function drawFanUI(apex, tips, t) {
   }
   sctx.setLineDash([]);
 
+  // 汇聚点：高亮大圆
+  sctx.shadowColor = 'rgba(255,92,200,1)'; sctx.shadowBlur = 32;
+  sctx.fillStyle = 'rgba(255,92,200,.98)';
+  sctx.beginPath(); sctx.arc(apex.x, apex.y, 12, 0, Math.PI * 2); sctx.fill();
+  sctx.strokeStyle = 'rgba(180,245,255,.95)'; sctx.lineWidth = 2.6;
+  sctx.beginPath(); sctx.arc(apex.x, apex.y, 21, 0, Math.PI * 2); sctx.stroke();
+  sctx.shadowBlur = 0;
+
+  // 五个指尖节点
+  for (let i = 0; i < tips.length; i++) {
+    const q = tips[i];
+    sctx.fillStyle = 'rgba(255,92,200,.95)';
+    sctx.shadowColor = 'rgba(255,92,200,1)'; sctx.shadowBlur = 20;
+    sctx.beginPath(); sctx.arc(q.x, q.y, 6, 0, Math.PI * 2); sctx.fill();
+    sctx.shadowBlur = 0;
+    sctx.strokeStyle = 'rgba(57,230,255,.9)'; sctx.lineWidth = 2;
+    sctx.beginPath(); sctx.arc(q.x, q.y, 11, 0, Math.PI * 2); sctx.stroke();
+  }
 
   // 二进制数字反馈
   sctx.font = '700 14px Consolas, monospace';
@@ -858,36 +861,6 @@ function drawFanUI(apex, tips, t) {
     const px = q.x + nx / nl * 30, py = q.y + ny / nl * 30;
     sctx.fillStyle = 'rgba(180,245,255,.95)';
     sctx.fillText(_binStream[i % _binStream.length], px, py);
-  }
-  sctx.restore();
-}
-
-/* 扇形模式下的二进制数字：跟随五个指尖 */
-function drawFanBinary(apex, tips, t) {
-  if (!apex || tips.length < 5) return;
-  sctx.save();
-  sctx.font = '700 15px Consolas, monospace';
-  sctx.textAlign = 'center';
-  sctx.textBaseline = 'middle';
-  const seeds = ['1210100', '1410100', '1010100', '0110100', '1101001'];
-  for (let i = 0; i < tips.length; i++) {
-    const q = tips[i];
-    const nx = q.x - apex.x, ny = q.y - apex.y;
-    const nl = Math.hypot(nx, ny) || 1;
-    const dist = 34 + Math.sin(t / 400 + i) * 5;
-    const px = q.x + nx / nl * dist;
-    const py = q.y + ny / nl * dist;
-    // 引线
-    sctx.strokeStyle = 'rgba(255,92,200,.5)';
-    sctx.lineWidth = 1.3;
-    sctx.beginPath(); sctx.moveTo(q.x, q.y); sctx.lineTo(px, py); sctx.stroke();
-    // 数字
-    const isCyan = i % 2 === 0;
-    sctx.shadowColor = isCyan ? 'rgba(57,230,255,1)' : 'rgba(255,92,200,1)';
-    sctx.shadowBlur = 18;
-    sctx.fillStyle = isCyan ? 'rgba(190,245,255,.98)' : 'rgba(255,200,240,.98)';
-    sctx.fillText(seeds[i], px, py);
-    sctx.shadowBlur = 0;
   }
   sctx.restore();
 }
@@ -1327,7 +1300,7 @@ function smoothLandmarks(list, t) {
 
 /* ---------- 稳定性：状态锁 + 丢帧计数 ---------- */
 /* 每种模式的最小保持时间（ms），防止快速切换造成闪烁 */
-const MIN_HOLD = { fan: 350, rect: 250, point: 150, idle: 80 };
+const MIN_HOLD = { fan: 150, rect: 150, point: 120, idle: 60 };
 let modeSince = 0;          // 当前模式进入时间
 let missCount = 0;          // 连续未命中期望模式的帧数
 
@@ -1356,7 +1329,7 @@ function onHands(list) {
   if (!list.length) {
     // 丢帧容忍：短暂丢手不清状态，避免画面闪断
     missCount++;
-    if (missCount > 10 && now - lastSeen > 300) {
+    if (missCount > 4 && now - lastSeen > 150) {
       enterMode('idle');
       targetReveal = 0; reveal = 0;
       targetFull = 0; fullMix = 0;
@@ -1369,90 +1342,29 @@ function onHands(list) {
   missCount = 0;
   lastSeen = now;
 
-  /* ========== 【优先级1】四边形抠洞 ==========
-     条件更严格（两手都要摆姿势），所以必须先判定，否则会被扇形抢走 */
+  // 【最高优先级】扇形模式：一只手五指攥紧=一个点，另一只手五指张开
+  // 点与五个指尖辐射连线，相邻两线夹出 4 个三角形，各施加一种滤镜
   if (list.length >= 2) {
-    /* ===== 四边形严格判定（逐指验证）=====
-       每只手必须：食指伸直 + 拇指伸直 + 中指/无名指/小指全部弯曲 */
-    const curls0 = list.map((lm, i) => (lm.__curl = smoothScore('curl', i, curlScore(lm))));
-    const opens0 = list.map(lm => indexThumbClearlyOpen(lm));
-    const curled0 = list.map(lm => othersReallyCurled(lm));
-    list.forEach((lm, i) => { lm.__open3 = opens0[i] ? 1 : 0; });
-    // 进入条件：收拢达标 + 食指拇指伸直 + 三指确实弯曲
-    // 维持条件：只要食指拇指还伸着就保持（不再看分数，避免抖动掉出）
-    const okNow = (mode === 'rect')
-      ? list.every(lm => indexThumbClearlyOpen(lm))
-      : (curls0.every(c => c >= CURL_ON) && opens0.every(v => v) && curled0.every(v => v));
-    if (okNow) {
-      const a = list[0], b = list[1];
-      const g = computeRectGeo(a, b);
-      rect = g;
-      if (!smoothRect) smoothRect = { cx: g.cx, cy: g.cy, area: g.area, pts: g.pts.map(q => ({ x: q.x, y: q.y })) };
-      else {
-        const k = 0.45;
-        smoothRect.cx += (g.cx - smoothRect.cx) * k;
-        smoothRect.cy += (g.cy - smoothRect.cy) * k;
-        smoothRect.area += (g.area - smoothRect.area) * k;
-        for (let i = 0; i < 4; i++) {
-          smoothRect.pts[i].x += (g.pts[i].x - smoothRect.pts[i].x) * k;
-          smoothRect.pts[i].y += (g.pts[i].y - smoothRect.pts[i].y) * k;
-        }
-      }
-      enterMode('rect');
-      rectHoldFrames = 40;
-      pointPos = null;
-      liveQuad = smoothRect.pts;
-      const q2 = smoothRect.pts;
-      let minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
-      for (const p of q2) {
-        if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
-        if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
-      }
-      const bw = Math.max(0, Math.min(CANVAS_W, maxX) - Math.max(0, minX));
-      const bh = Math.max(0, Math.min(CANVAS_H, maxY) - Math.max(0, minY));
-      const area0 = Math.min(bw / CANVAS_W, bh / CANVAS_H);
-      targetReveal = 1;
-      lastArea = area0;
-      fanTriangles = []; fanLastTri = [];
-      if (!isFull) {
-        if (area0 >= FULL_THRESHOLD) {
-          isFull = true; targetFull = 1; glitch();
-          fullAnim = 0;
-          fullAnimFrom = liveQuad.map(p => ({ x: p.x, y: p.y }));
-          fullAnimTarget = [{ x: 0, y: 0 }, { x: CANVAS_W, y: 0 }, { x: CANVAS_W, y: CANVAS_H }, { x: 0, y: CANVAS_H }];
-          startPlayback();
-          setState('FULL / 全屏播放', '已进入全屏', 'full');
-        } else {
-          setState('RECT / 抠洞 ' + Math.round(area0 * 100) + '%', '三点收紧 · 食指拇指构成四边形', 'live');
-        }
-      }
-      return;
+    // 对每只手算置信度，取最像攥拳的 / 最像张开的，且必须高于对方的握拳分
+    let ci = -1, si = -1, bestCl = -1, bestSp = -1;
+    for (let i = 0; i < list.length; i++) {
+      const c = smoothScore('clench', i, clenchScore(list[i]));
+      const s = smoothScore('spread', i, spreadScore(list[i]));
+      list[i].__clench = c; list[i].__spread = s;
+      // 同一只手不可能既攥紧又完全张开：要求分差明显
+      // 手指转动会让分数波动，所以用滞回：已在扇形时放宽进入条件
+      const relax = (mode === 'fan') ? 0.25 : 0;
+      const clNeed = CLENCH_ON - relax, spNeed = SPREAD_ON - relax;
+      // 手转正时 z 深度变化会让两个分数同时波动，因此不再强制要求分差
+      const margin = (mode === 'fan') ? 0 : 0.03;
+      // 攥拳手：分数达标即可
+      if (c >= clNeed && c > s + margin && c > bestCl) { bestCl = c; ci = i; }
+      // 张开手：分数达标即可
+      if (s >= spNeed && s > c + margin && s > bestSp) { bestSp = s; si = i; }
     }
-  }
-
-  // 【优先级2】扇形模式：一只手攥拳=一个点，另一只手五指张开
-  if (list.length >= 2) {
-    // 策略：找到「最像攥拳」的那只手作为点，另一只手直接作为张开的五指
-    // —— 不再要求张开手达标，只要它比攥拳手更像张开即可（手掌转向也稳定）
-    let ci = -1, si = -1, bestCl = -1;
-    const scores = list.map((lm, i) => {
-      const c = smoothScore('clench', i, clenchScore(lm));
-      const s = smoothScore('spread', i, spreadScore(lm));
-      lm.__clench = c; lm.__spread = s;
-      return { i, c, s };
-    });
-    // 攥拳手：攥拳分最高且达到阈值（已在扇形时放宽）
-    const relax = (mode === 'fan') ? 0.45 : 0;   // 已在扇形时大幅放宽
-    const clNeed = CLENCH_ON - relax;
-    for (const sc of scores) {
-      if (sc.c >= clNeed && sc.c >= sc.s && sc.c > bestCl) { bestCl = sc.c; ci = sc.i; }
-    }
-    // 张开手：另一只手必须「不是攥拳状态」才担任（防止双手都攥拳时误触发滤镜）
-    if (ci >= 0) {
-      const other = scores.filter(x => x.i !== ci).sort((a, b) => b.s - a.s)[0];
-      if (other && other.c < CLENCH_ON) si = other.i;   // 双手都攥拳 → 不触发扇形
-    }
-    if (ci >= 0 && si >= 0 && ci !== si) {
+    // 必须分别是不同的两只手
+    if (ci === si) { ci = -1; si = -1; }
+    if (ci >= 0 && si >= 0) {
       const cp = clenchedPoint(list[ci]);
       const apex = { x: (1 - cp.x) * CANVAS_W, y: cp.y * CANVAS_H };
       // 五指按拇指→小指顺序取指尖
@@ -1467,13 +1379,13 @@ function onHands(list) {
       fanLastTri = fanTriangles;
       // 已处于扇形时：直接维持，不再要求重新确认（避免转动时断续）
       if (mode === 'fan') {
-        fanHoldFrames = 30;
+        fanHoldFrames = 12;
         setState('FAN / 4 三角形滤镜', '攥拳成点 · 另一手五指张开 → 4 个滤镜三角形', 'live');
         return;
       }
       if (confirmMode('fan') && canSwitch('fan')) {
         enterMode('fan');
-        fanHoldFrames = 30;
+        fanHoldFrames = 12;
         pointPos = null; smoothRect = null; liveQuad = null;
         targetReveal = 0; targetFull = 0;
         setState('FAN / 4 三角形滤镜', '攥拳成点 · 另一手五指张开 → 4 个滤镜三角形', 'live');
@@ -1497,8 +1409,14 @@ function onHands(list) {
     }
   }
 
-  // 四边形已在上面优先处理；这里只保留「维持/退出」逻辑
-  if (false) {
+  // 四边形模式：两手「其余六指全部收紧」即触发（食指拇指自然张开用于取框角）
+  const curls = list.map((lm, i) => (lm.__curl = smoothScore('curl', i, curlScore(lm))));
+  const opens = list.map(lm => (lm.__open3 = indexThumbClearlyOpen(lm) ? 1 : 0));
+  const opensOk = list.map(lm => indexThumbClearlyOpen(lm));
+  const bothCurled = list.length >= 2 &&
+    curls.every(c => c >= CURL_ON) &&      // 六指收紧
+    opensOk.every(v => v);                 // 且食指+拇指明显伸开
+  if (bothCurled && confirmMode('rect') && canSwitch('rect')) {
     const a = list[0], b = list[1];
     const g = computeRectGeo(a, b);
     rect = g;
@@ -1517,7 +1435,6 @@ function onHands(list) {
       }
     }
     enterMode('rect');
-    rectHoldFrames = 40;   // 每次成功识别都刷新保持窗口
     pointPos = null;
 
     // 洞占屏比例 → 决定 reveal 与全屏
@@ -1556,16 +1473,7 @@ function onHands(list) {
     return;
   }
 
-  // 四边形保持窗口：短暂不达标也维持，避免闪烁
-  if (mode === 'rect' && list.length >= 2) {
-    rectHoldFrames--;
-    if (rectHoldFrames > 0 && smoothRect) {
-      liveQuad = smoothRect.pts;
-      setState('RECT / 抠洞', '保持中…', 'live');
-      return;
-    }
-  }
-  // 检测到两只手但六指未收紧：退出四边形
+  // 检测到两只手但六指未收紧：立即退出四边形，不触发
   if (list.length >= 2) {
     if (mode === 'rect' && canSwitch('idle')) {
       liveQuad = null; smoothRect = null;
@@ -1775,13 +1683,6 @@ function stopRecording() {
 $('#rec').addEventListener('click', () => { recorder ? stopRecording() : startRecording(); });
 
 /* ---------- 骨架节点线开关 ---------- */
-/* ---------- 二进制特效开关 ---------- */
-$('#binBtn').addEventListener('click', () => {
-  SHOW_BINARY = !SHOW_BINARY;
-  $('#binBtn').textContent = '二进制：' + (SHOW_BINARY ? '开' : '关');
-  $('#binBtn').classList.toggle('off', !SHOW_BINARY);
-});
-
 $('#skelBtn').addEventListener('click', () => {
   SHOW_SKELETON = !SHOW_SKELETON;
   $('#skelBtn').textContent = '骨架线：' + (SHOW_SKELETON ? '开' : '关');
@@ -2097,8 +1998,8 @@ function loop() {
     if (mode === 'fan' && fanApex && fanTips.length === 5) {
       drawFanUI(fanApex, fanTips, performance.now());
     }
-    // 二进制数字只在四边形模式下绘制（避免残影）
-    if (SHOW_BINARY && mode === 'rect' && liveQuad && liveQuad.length === 4) {
+    // 二进制数字交互反馈：四边形模式下跟随四点移动
+    if (liveQuad && liveQuad.length === 4) {
       drawBinaryUI(liveQuad, performance.now());
     }
   }
@@ -2129,22 +2030,12 @@ function loop() {
       ' 张开 ' + lastList.map(l => tagNum(l.__spread, SPREAD_ON)).join(' ') +
       ' 收拢 ' + lastList.map(l => tagNum(l.__curl, CURL_ON)).join(' ') +
       ' 开指 ' + lastList.map(l => (l.__open3 ? 'Y' : 'N')).join(' ') +
-      ' 卷指 ' + lastList.map(l => {
-        if (!l[12]) return '-';
-        // 显示中指的弯曲比值：<1.25 才算弯曲
-        const r2 = d2(l[12], l[9]) / (d2(l[10], l[9]) + 1e-6);
-        const r3 = d3(l[12], l[9]) / (d3(l[10], l[9]) + 1e-6);
-        const n = l.__curlCnt === undefined ? 0 : l.__curlCnt;
-        return n + '/3(' + r2.toFixed(1) + ',' + r3.toFixed(1) + ')';
-      }).join(' ') +
       ' 伸开 ' + lastList.map(l => {
         if (!l[4]) return '-';
         // 实时算一次，确保面板显示的就是判定用的值
-        // 显示平面/深度两个比值：2.0/2.1 表示两个维度都测到伸直
-        const ir2 = d2(l[8], l[5]) / (d2(l[6], l[5]) + 1e-6);
-        const ir3 = d3(l[8], l[5]) / (d3(l[6], l[5]) + 1e-6);
-        const tr2 = d2(l[4], l[2]) / (d2(l[3], l[2]) + 1e-6);
-        return (ir2.toFixed(1) + '/' + ir3.toFixed(1) + ' ' + tr2.toFixed(1));
+        const ir = d2(l[8], l[5]) / (d2(l[6], l[5]) + 1e-6);
+        const tr = d2(l[4], l[2]) / (d2(l[3], l[2]) + 1e-6);
+        return ir.toFixed(2) + '/' + tr.toFixed(2);
       }).join(' ') + '\n' +
       '↑ 绿=达标(握≥' + CLENCH_ON + ' 张≥' + SPREAD_ON + ' 收拢≥' + CURL_ON + ')\n' +
       '四点 ' + q + '\n' +
