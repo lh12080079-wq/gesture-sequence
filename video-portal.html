@@ -616,16 +616,16 @@ function randBinCached(i) { return _binStream[i % _binStream.length]; }
 function clenchScore(lm) {
   const palm = palmOf(lm), r = scaleOf(lm);
   const TIPS = [4, 8, 12, 16, 20];
-  // ① 每个指尖到掌心的平均距离（越小越像攥拳）
+  // ① 每个指尖到掌心的平均距离（用 3D，手掌转向时依然稳定）
   let nearSum = 0;
-  for (const i of TIPS) nearSum += Math.min(1.6, d2(lm[i], palm) / r);
-  const nearAvg = nearSum / TIPS.length;              // ~0.6 攥紧, ~2.0 张开
-  const nearScore = clamp01((1.55 - nearAvg) / 0.75); // 放宽：更容易判为攥紧
+  for (const i of TIPS) nearSum += Math.min(1.8, d3(lm[i], palm) / r);
+  const nearAvg = nearSum / TIPS.length;
+  const nearScore = clamp01((1.65 - nearAvg) / 0.8);
   // ② 指尖之间的紧凑度
   let maxd = 0;
   for (let i = 0; i < TIPS.length; i++)
     for (let j = i + 1; j < TIPS.length; j++)
-      maxd = Math.max(maxd, d2(lm[TIPS[i]], lm[TIPS[j]]) / r);
+      maxd = Math.max(maxd, d3(lm[TIPS[i]], lm[TIPS[j]]) / r);
   const tightScore = clamp01((1.9 - maxd) / 1.1);
   // ③ 指尖到掌心的平均 z 深度（攥拳时更贴近掌心平面）
   let zSum = 0;
@@ -636,9 +636,9 @@ function clenchScore(lm) {
   const FINGERS = [[8, 6], [12, 10], [16, 14], [20, 18]];  // [指尖, pip]
   let bendSum = 0;
   for (const [tip, pip] of FINGERS) {
-    const dTip = d2(lm[tip], palm), dPip = d2(lm[pip], palm);
-    // 指尖比 pip 更靠近掌心 → 弯曲；比值越小弯曲越充分
-    bendSum += clamp01((dPip - dTip) / (dPip * 0.55 + 1e-6));
+    const dTip = d3(lm[tip], palm), dPip = d3(lm[pip], palm);
+    // 指尖比 pip 更靠近掌心 → 弯曲（用 3D 抗朝向变化）
+    bendSum += clamp01((dPip - dTip) / (dPip * 0.5 + 1e-6));
   }
   const curlScore2 = clamp01(bendSum / FINGERS.length);
   // ⑤ 拇指是否内收（拇指尖靠近食指根）
@@ -1365,26 +1365,27 @@ function onHands(list) {
   // 【最高优先级】扇形模式：一只手五指攥紧=一个点，另一只手五指张开
   // 点与五个指尖辐射连线，相邻两线夹出 4 个三角形，各施加一种滤镜
   if (list.length >= 2) {
-    // 对每只手算置信度，取最像攥拳的 / 最像张开的，且必须高于对方的握拳分
-    let ci = -1, si = -1, bestCl = -1, bestSp = -1;
-    for (let i = 0; i < list.length; i++) {
-      const c = smoothScore('clench', i, clenchScore(list[i]));
-      const s = smoothScore('spread', i, spreadScore(list[i]));
-      list[i].__clench = c; list[i].__spread = s;
-      // 同一只手不可能既攥紧又完全张开：要求分差明显
-      // 手指转动会让分数波动，所以用滞回：已在扇形时放宽进入条件
-      const relax = (mode === 'fan') ? 0.25 : 0;
-      const clNeed = CLENCH_ON - relax, spNeed = SPREAD_ON - relax;
-      // 手转正时 z 深度变化会让两个分数同时波动，因此不再强制要求分差
-      const margin = (mode === 'fan') ? 0 : 0.03;
-      // 攥拳手：分数达标即可
-      if (c >= clNeed && c > s + margin && c > bestCl) { bestCl = c; ci = i; }
-      // 张开手：分数达标即可
-      if (s >= spNeed && s > c + margin && s > bestSp) { bestSp = s; si = i; }
+    // 策略：找到「最像攥拳」的那只手作为点，另一只手直接作为张开的五指
+    // —— 不再要求张开手达标，只要它比攥拳手更像张开即可（手掌转向也稳定）
+    let ci = -1, si = -1, bestCl = -1;
+    const scores = list.map((lm, i) => {
+      const c = smoothScore('clench', i, clenchScore(lm));
+      const s = smoothScore('spread', i, spreadScore(lm));
+      lm.__clench = c; lm.__spread = s;
+      return { i, c, s };
+    });
+    // 攥拳手：攥拳分最高且达到阈值（已在扇形时放宽）
+    const relax = (mode === 'fan') ? 0.30 : 0;
+    const clNeed = CLENCH_ON - relax;
+    for (const sc of scores) {
+      if (sc.c >= clNeed && sc.c >= sc.s && sc.c > bestCl) { bestCl = sc.c; ci = sc.i; }
     }
-    // 必须分别是不同的两只手
-    if (ci === si) { ci = -1; si = -1; }
-    if (ci >= 0 && si >= 0) {
+    // 张开手：另一只手直接担任（不设张开分门槛）
+    if (ci >= 0) {
+      const other = scores.filter(x => x.i !== ci).sort((a, b) => b.s - a.s)[0];
+      if (other) si = other.i;
+    }
+    if (ci >= 0 && si >= 0 && ci !== si) {
       const cp = clenchedPoint(list[ci]);
       const apex = { x: (1 - cp.x) * CANVAS_W, y: cp.y * CANVAS_H };
       // 五指按拇指→小指顺序取指尖
