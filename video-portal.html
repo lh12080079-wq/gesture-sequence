@@ -674,12 +674,15 @@ const SPREAD_ON = 0.40, SPREAD_OFF = 0.24;
 let clenchLatched = false, spreadLatched = false;
 let fanHoldFrames = 0;   // 扇形保持帧数，容忍短暂丢失
 let fanLastTri = [];     // 上次的三角形，保持期内沿用避免闪烁
+let rectHoldFrames = 0;  // 四边形保持帧数
 let fanAlpha = 0;        // 滤镜淡入淡出，避免瞬间消失
 /* 分数的时间平滑：历史队列取平均，避免单帧波动 */
 const scoreHist = { clench: [[], []], spread: [[], []], curl: [[], []] };
 function smoothScore(kind, idx, v) {
   const q = scoreHist[kind][idx] || (scoreHist[kind][idx] = []);
-  q.push(v); if (q.length > 8) q.shift();   // 更长窗口，分数更稳
+  // 窗口按类型区分：收拢/张开需快速响应，握拳需稳定
+  const win = (kind === 'curl') ? 3 : (kind === 'clench' ? 6 : 4);
+  q.push(v); if (q.length > win) q.shift();
   let s = 0; for (const x of q) s += x;
   return s / q.length;
 }
@@ -722,7 +725,7 @@ function indexThumbClearlyOpen(lm) {
   lm.__idxR = idxRatio; lm.__thumbR = thumbRatio;
   return idxRatio > 1.55 && thumbRatio > 1.25;
 }
-const CURL_ON = 0.48, CURL_OFF = 0.32;
+const CURL_ON = 0.42, CURL_OFF = 0.28;
 function isOthersCurled(lm) {
   const s = curlScore(lm);
   lm.__curl = s;
@@ -1422,9 +1425,11 @@ function onHands(list) {
   const curls = list.map((lm, i) => (lm.__curl = smoothScore('curl', i, curlScore(lm))));
   const opens = list.map(lm => (lm.__open3 = indexThumbClearlyOpen(lm) ? 1 : 0));
   const opensOk = list.map(lm => indexThumbClearlyOpen(lm));
+  // 已在四边形模式时放宽维持门槛，避免轻微抖动就掉出
+  const curlNeed = (mode === 'rect') ? CURL_ON - 0.12 : CURL_ON;
   const bothCurled = list.length >= 2 &&
-    curls.every(c => c >= CURL_ON) &&      // 六指收紧
-    opensOk.every(v => v);                 // 且食指+拇指明显伸开
+    curls.every(c => c >= curlNeed) &&
+    (mode === 'rect' || opensOk.every(v => v));
   if (bothCurled && confirmMode('rect') && canSwitch('rect')) {
     const a = list[0], b = list[1];
     const g = computeRectGeo(a, b);
@@ -1444,6 +1449,7 @@ function onHands(list) {
       }
     }
     enterMode('rect');
+    rectHoldFrames = 20;   // 每次成功识别都刷新保持窗口
     pointPos = null;
 
     // 洞占屏比例 → 决定 reveal 与全屏
@@ -1482,7 +1488,16 @@ function onHands(list) {
     return;
   }
 
-  // 检测到两只手但六指未收紧：立即退出四边形，不触发
+  // 四边形保持窗口：短暂不达标也维持，避免闪烁
+  if (mode === 'rect' && list.length >= 2) {
+    rectHoldFrames--;
+    if (rectHoldFrames > 0 && smoothRect) {
+      liveQuad = smoothRect.pts;
+      setState('RECT / 抠洞', '保持中…', 'live');
+      return;
+    }
+  }
+  // 检测到两只手但六指未收紧：退出四边形
   if (list.length >= 2) {
     if (mode === 'rect' && canSwitch('idle')) {
       liveQuad = null; smoothRect = null;
