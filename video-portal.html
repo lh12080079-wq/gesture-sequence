@@ -419,14 +419,7 @@ function drawSkeleton(list, hasPoint) {
     }
     sctx.shadowBlur = 0;
 
-    // 两个关键点：食指(8) 与 拇指(4) —— 只画实心点，不画圆环
-    for (const i of [4, 8]) {
-      const q = pt(lm[i]);
-      sctx.shadowColor = PINK + '1)'; sctx.shadowBlur = 18;
-      sctx.fillStyle = PINK + '.95)';
-      sctx.beginPath(); sctx.arc(q.x, q.y, 5, 0, Math.PI * 2); sctx.fill();
-      sctx.shadowBlur = 0;
-    }
+    // 不再绘制任何圆点，只保留骨架连线
   });
 
   // 单点：只在另一只手存在时连线，不画任何圆点
@@ -603,6 +596,11 @@ function randBinCached(i) { return _binStream[i % _binStream.length]; }
 function clenchScore(lm) {
   const palm = palmOf(lm), r = scaleOf(lm);
   const TIPS = [4, 8, 12, 16, 20];
+  /* ⓪ 攥拳前提：食指/中指/无名指/小指 至少三根明确弯曲
+     —— 只收三指做四边形时，食指是伸直的，这里会拦截，避免混淆 */
+  const curledN = [ [5,6,8], [9,10,12], [13,14,16], [17,18,20] ]
+    .filter(([m,p,t]) => fingerCurled(lm, m, p, t)).length;
+  if (curledN < 3) return 0;
   // ① 每个指尖到掌心的平均距离（用 3D，手掌转向时依然稳定）
   let nearSum = 0;
   for (const i of TIPS) nearSum += Math.min(1.8, d3(lm[i], palm) / r);
@@ -713,11 +711,18 @@ function curlScore(lm) {
    用 3D 距离，手掌转动时依然稳定 */
 /* 用「指尖到掌指关节」与「第二关节到掌指关节」的比值判定
    —— 基准点取该手指自己的根部(mcp)，比用掌心稳定得多 */
-function fingerStraight(lm, mcp, pip, tip) {
+function fingerRatio(lm, mcp, pip, tip) {
   const dm = d3(lm[tip], lm[mcp]);   // 指尖 → 指根
   const dp = d3(lm[pip], lm[mcp]);   // 第二关节 → 指根
-  // 伸直时指尖离指根明显更远（比值 > 1.35）；弯曲时两者接近
-  return (dm / (dp + 1e-6)) > 1.22;
+  return dm / (dp + 1e-6);
+}
+/* 伸直：比值 > 1.30（正常伸直 1.6~2.2） */
+function fingerStraight(lm, mcp, pip, tip) {
+  return fingerRatio(lm, mcp, pip, tip) > 1.30;
+}
+/* 明确弯曲：比值 < 1.15（避免过渡区被误判为弯曲） */
+function fingerCurled(lm, mcp, pip, tip) {
+  return fingerRatio(lm, mcp, pip, tip) < 1.15;
 }
 /* 食指(8/6) 与 拇指(4/2) 是否都伸直 */
 function indexThumbClearlyOpen(lm) {
@@ -731,9 +736,9 @@ function indexThumbClearlyOpen(lm) {
 /* 中指(12/10)、无名指(16/14)、小指(20/18) 是否都弯曲收紧 */
 function othersReallyCurled(lm) {
   // 中指 根9→10→12 ; 无名指 根13→14→16 ; 小指 根17→18→20
-  const a = !fingerStraight(lm, 9, 10, 12);
-  const b = !fingerStraight(lm, 13, 14, 16);
-  const c = !fingerStraight(lm, 17, 18, 20);
+  const a = fingerCurled(lm, 9, 10, 12);
+  const b = fingerCurled(lm, 13, 14, 16);
+  const c = fingerCurled(lm, 17, 18, 20);
   lm.__curlCnt = (a ? 1 : 0) + (b ? 1 : 0) + (c ? 1 : 0);
   return a && b && c;
 }
