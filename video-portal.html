@@ -700,19 +700,16 @@ function confirmMode(next) {
 /* 四边形模式专用：一只手的"其余三指"必须收紧
    食指(8)与拇指(4)用来构成框角，中指(12)/无名指(16)/小指(20)必须收拢 */
 /* 严格收拢判定：三指必须"真的弯下去"，光靠近不够 */
+/* 收拢分：用「指尖/第二关节 相对指根」的比值，与 fingerStraight 同一套几何 */
 function curlScore(lm) {
-  const palm = palmOf(lm), r = scaleOf(lm);
-  const FINGERS = [[12, 10], [16, 14], [20, 18]];   // [指尖, 第二指节]
-  const scores = FINGERS.map(([tip, pip]) => {
-    const dTip = d3(lm[tip], palm) / r;
-    const dPip = d3(lm[pip], palm) / r;
-    // ① 指尖靠近掌心（放宽：阈值放到 2.0，正常收拢约 1.0~1.4）
-    const near = clamp01((2.25 - dTip) / 0.95);
-    // ② 指尖比第二指节更靠近掌心 = 真的弯曲
-    const bent = clamp01((dPip - dTip) / (dPip * 0.30 + 1e-6));
-    return near * 0.5 + bent * 0.5;
+  const FINGERS = [[9, 10, 12], [13, 14, 16], [17, 18, 20]];
+  const scores = FINGERS.map(([mcp, pip, tip]) => {
+    const dm = d3(lm[tip], lm[mcp]) + 1e-6;
+    const dp = d3(lm[pip], lm[mcp]) + 1e-6;
+    const ratio = dm / dp;          // 伸直 ~1.6-2.2, 弯曲 ~0.9-1.3
+    // 比值越小 → 弯曲越充分 → 分越高
+    return clamp01((1.75 - ratio) / 0.75);
   });
-  // 最小值主导但不极端，兼顾"都要收紧"和容错
   scores.sort((a, b) => a - b);
   const worst = scores[0], avg = (scores[0] + scores[1] + scores[2]) / 3;
   return clamp01(worst * 0.45 + avg * 0.55);
@@ -720,30 +717,33 @@ function curlScore(lm) {
 /* ===== 逐指伸展判定（四边形的核心条件） =====
    返回每根手指是否"伸直"：伸直时指尖离掌心的距离显著大于第一指节
    用 3D 距离，手掌转动时依然稳定 */
-function fingerStraight(lm, tip, pip) {
-  const palm = palmOf(lm);
-  const dTip = d3(lm[tip], palm);
-  const dPip = d3(lm[pip], palm);
-  // 伸直：指尖明显比第二关节远离掌心（比值 > 1.25）
-  return (dTip / (dPip + 1e-6)) > 1.25;
+/* 用「指尖到掌指关节」与「第二关节到掌指关节」的比值判定
+   —— 基准点取该手指自己的根部(mcp)，比用掌心稳定得多 */
+function fingerStraight(lm, mcp, pip, tip) {
+  const dm = d3(lm[tip], lm[mcp]);   // 指尖 → 指根
+  const dp = d3(lm[pip], lm[mcp]);   // 第二关节 → 指根
+  // 伸直时指尖离指根明显更远（比值 > 1.35）；弯曲时两者接近
+  return (dm / (dp + 1e-6)) > 1.35;
 }
 /* 食指(8/6) 与 拇指(4/2) 是否都伸直 */
 function indexThumbClearlyOpen(lm) {
-  const idxStraight = fingerStraight(lm, 8, 6);
-  const thumbStraight = fingerStraight(lm, 4, 2);
+  // 食指: 根5 → 关节6 → 指尖8 ; 拇指: 根2 → 关节3 → 指尖4
+  const idxStraight = fingerStraight(lm, 5, 6, 8);
+  const thumbStraight = fingerStraight(lm, 2, 3, 4);
   lm.__idxOpen = idxStraight;
   lm.__thumbOpen = thumbStraight;
   return idxStraight && thumbStraight;
 }
 /* 中指(12/10)、无名指(16/14)、小指(20/18) 是否都弯曲收紧 */
 function othersReallyCurled(lm) {
-  const a = !fingerStraight(lm, 12, 10);
-  const b = !fingerStraight(lm, 16, 14);
-  const c = !fingerStraight(lm, 20, 18);
+  // 中指 根9→10→12 ; 无名指 根13→14→16 ; 小指 根17→18→20
+  const a = !fingerStraight(lm, 9, 10, 12);
+  const b = !fingerStraight(lm, 13, 14, 16);
+  const c = !fingerStraight(lm, 17, 18, 20);
   lm.__curlCnt = (a ? 1 : 0) + (b ? 1 : 0) + (c ? 1 : 0);
   return a && b && c;
 }
-const CURL_ON = 0.55, CURL_OFF = 0.35;
+const CURL_ON = 0.50, CURL_OFF = 0.32;
 function isOthersCurled(lm) {
   const s = curlScore(lm);
   lm.__curl = s;
@@ -2133,8 +2133,8 @@ function loop() {
       ' 伸开 ' + lastList.map(l => {
         if (!l[4]) return '-';
         // 实时算一次，确保面板显示的就是判定用的值
-        const ir = d2(l[8], l[5]) / (d2(l[6], l[5]) + 1e-6);
-        const tr = d2(l[4], l[2]) / (d2(l[3], l[2]) + 1e-6);
+        const ir = d3(l[8], l[5]) / (d3(l[6], l[5]) + 1e-6);
+        const tr = d3(l[4], l[2]) / (d3(l[3], l[2]) + 1e-6);
         return ir.toFixed(2) + '/' + tr.toFixed(2);
       }).join(' ') + '\n' +
       '↑ 绿=达标(握≥' + CLENCH_ON + ' 张≥' + SPREAD_ON + ' 收拢≥' + CURL_ON + ')\n' +
