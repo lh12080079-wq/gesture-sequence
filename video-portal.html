@@ -711,18 +711,26 @@ function curlScore(lm) {
    用 3D 距离，手掌转动时依然稳定 */
 /* 用「指尖到掌指关节」与「第二关节到掌指关节」的比值判定
    —— 基准点取该手指自己的根部(mcp)，比用掌心稳定得多 */
+/* 手指数值：用「指尖/第二关节 到指根」的比值。
+   关键：平面(d2)比值在手掌正对摄像头时最准；深度(d3)比值在手侧对时最准。
+   两者取"更保守"的组合 —— 伸直看 d2（更可靠），弯曲看 d3 */
 function fingerRatio(lm, mcp, pip, tip) {
-  const dm = d3(lm[tip], lm[mcp]);   // 指尖 → 指根
-  const dp = d3(lm[pip], lm[mcp]);   // 第二关节 → 指根
-  return dm / (dp + 1e-6);
+  const dm2 = d2(lm[tip], lm[mcp]), dp2 = d2(lm[pip], lm[mcp]);
+  const dm3 = d3(lm[tip], lm[mcp]), dp3 = d3(lm[pip], lm[mcp]);
+  const r2 = dm2 / (dp2 + 1e-6);
+  const r3 = dm3 / (dp3 + 1e-6);
+  // 手掌正对摄像头（z 抖动大）时以 d2 为主；侧对时以 d3 为主
+  return { r2, r3, p2: dp2 / (dp2 + dp3 + 1e-6) };
 }
-/* 伸直：比值 > 1.30（正常伸直 1.6~2.2） */
+/* 伸直判定：平面比值达标即可（正对摄像头时最可靠） */
 function fingerStraight(lm, mcp, pip, tip) {
-  return fingerRatio(lm, mcp, pip, tip) > 1.30;
+  const { r2, r3 } = fingerRatio(lm, mcp, pip, tip);
+  return r2 > 1.25 || r3 > 1.30;
 }
-/* 明确弯曲：比值 < 1.15（避免过渡区被误判为弯曲） */
+/* 弯曲判定：平面与深度都要显示是弯的（双条件，避免误判） */
 function fingerCurled(lm, mcp, pip, tip) {
-  return fingerRatio(lm, mcp, pip, tip) < 1.15;
+  const { r2, r3 } = fingerRatio(lm, mcp, pip, tip);
+  return r2 < 1.25 && r3 < 1.30;
 }
 /* 食指(8/6) 与 拇指(4/2) 是否都伸直 */
 function indexThumbClearlyOpen(lm) {
@@ -2129,13 +2137,22 @@ function loop() {
       ' 张开 ' + lastList.map(l => tagNum(l.__spread, SPREAD_ON)).join(' ') +
       ' 收拢 ' + lastList.map(l => tagNum(l.__curl, CURL_ON)).join(' ') +
       ' 开指 ' + lastList.map(l => (l.__open3 ? 'Y' : 'N')).join(' ') +
-      ' 卷指 ' + lastList.map(l => (l.__curlCnt === undefined ? '-' : l.__curlCnt + '/3')).join(' ') +
+      ' 卷指 ' + lastList.map(l => {
+        if (!l[12]) return '-';
+        // 显示中指的弯曲比值：<1.25 才算弯曲
+        const r2 = d2(l[12], l[9]) / (d2(l[10], l[9]) + 1e-6);
+        const r3 = d3(l[12], l[9]) / (d3(l[10], l[9]) + 1e-6);
+        const n = l.__curlCnt === undefined ? 0 : l.__curlCnt;
+        return n + '/3(' + r2.toFixed(1) + ',' + r3.toFixed(1) + ')';
+      }).join(' ') +
       ' 伸开 ' + lastList.map(l => {
         if (!l[4]) return '-';
         // 实时算一次，确保面板显示的就是判定用的值
-        const ir = d3(l[8], l[5]) / (d3(l[6], l[5]) + 1e-6);
-        const tr = d3(l[4], l[2]) / (d3(l[3], l[2]) + 1e-6);
-        return ir.toFixed(2) + '/' + tr.toFixed(2);
+        // 显示平面/深度两个比值：2.0/2.1 表示两个维度都测到伸直
+        const ir2 = d2(l[8], l[5]) / (d2(l[6], l[5]) + 1e-6);
+        const ir3 = d3(l[8], l[5]) / (d3(l[6], l[5]) + 1e-6);
+        const tr2 = d2(l[4], l[2]) / (d2(l[3], l[2]) + 1e-6);
+        return (ir2.toFixed(1) + '/' + ir3.toFixed(1) + ' ' + tr2.toFixed(1));
       }).join(' ') + '\n' +
       '↑ 绿=达标(握≥' + CLENCH_ON + ' 张≥' + SPREAD_ON + ' 收拢≥' + CURL_ON + ')\n' +
       '四点 ' + q + '\n' +
