@@ -723,21 +723,26 @@ function fingerRatio(lm, mcp, pip, tip) {
   // 手掌正对摄像头（z 抖动大）时以 d2 为主；侧对时以 d3 为主
   return { r2, r3, p2: dp2 / (dp2 + dp3 + 1e-6) };
 }
-/* 伸直判定：平面比值达标即可（正对摄像头时最可靠） */
+/* 伸直判定：用凌晨版验证过的平面比值阈值（食指 1.55 / 其他 1.30） */
 function fingerStraight(lm, mcp, pip, tip) {
-  const { r2, r3 } = fingerRatio(lm, mcp, pip, tip);
-  return r2 > 1.25 || r3 > 1.30;
+  const { r2 } = fingerRatio(lm, mcp, pip, tip);
+  // 食指用较严的 1.55，其余手指用 1.30
+  const need = (mcp === 5) ? 1.55 : 1.30;
+  return r2 > need;
 }
-/* 弯曲判定：任一维度显示弯曲即可（避免手掌正对摄像头时深度误差导致误判） */
+/* 弯曲判定：平面比值明显小于伸直阈值即算弯曲 */
 function fingerCurled(lm, mcp, pip, tip) {
-  const { r2, r3 } = fingerRatio(lm, mcp, pip, tip);
-  return r2 < 1.35 || r3 < 1.40;
+  const { r2 } = fingerRatio(lm, mcp, pip, tip);
+  return r2 < 1.30;
 }
 /* 食指(8/6) 与 拇指(4/2) 是否都伸直 */
 function indexThumbClearlyOpen(lm) {
-  // 食指: 根5 → 关节6 → 指尖8 ; 拇指: 根2 → 关节3 → 指尖4
-  const idxStraight = fingerStraight(lm, 5, 6, 8);
-  const thumbStraight = fingerStraight(lm, 2, 3, 4);
+  // 直接用凌晨版验证过的公式（纯平面比值，正对摄像头最可靠）
+  const idxRatio = d2(lm[8], lm[5]) / (d2(lm[6], lm[5]) + 1e-6);
+  const thumbRatio = d2(lm[4], lm[2]) / (d2(lm[3], lm[2]) + 1e-6);
+  lm.__idxR = idxRatio; lm.__thumbR = thumbRatio;
+  const idxStraight = idxRatio > 1.55;
+  const thumbStraight = thumbRatio > 1.25;
   lm.__idxOpen = idxStraight;
   lm.__thumbOpen = thumbStraight;
   return idxStraight && thumbStraight;
