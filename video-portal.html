@@ -418,14 +418,6 @@ function drawSkeleton(list, hasPoint) {
     }
     sctx.shadowBlur = 0;
 
-    // 非关键关节：淡化的小点
-    sctx.fillStyle = CYAN + '.45)';
-    for (let i = 0; i < lm.length; i++) {
-      if ([4, 8, 12, 16, 20].includes(i)) continue;
-      const q = pt(lm[i]);
-      sctx.beginPath(); sctx.arc(q.x, q.y, 1.8, 0, Math.PI * 2); sctx.fill();
-    }
-
     // 两个关键点：食指(8) 与 拇指(4) —— 只画实心点，不画圆环
     for (const i of [4, 8]) {
       const q = pt(lm[i]);
@@ -677,7 +669,7 @@ function tagNum(v, need) {
 }
 
 /* 滞回：进入需 ≥ ON，退出需 < OFF，避免临界抖动 */
-const CLENCH_ON = 0.45, CLENCH_OFF = 0.28;
+const CLENCH_ON = 0.40, CLENCH_OFF = 0.22;
 const SPREAD_ON = 0.40, SPREAD_OFF = 0.24;
 let clenchLatched = false, spreadLatched = false;
 let fanHoldFrames = 0;   // 扇形保持帧数，容忍短暂丢失
@@ -687,7 +679,7 @@ let fanAlpha = 0;        // 滤镜淡入淡出，避免瞬间消失
 const scoreHist = { clench: [[], []], spread: [[], []], curl: [[], []] };
 function smoothScore(kind, idx, v) {
   const q = scoreHist[kind][idx] || (scoreHist[kind][idx] = []);
-  q.push(v); if (q.length > 4) q.shift();
+  q.push(v); if (q.length > 8) q.shift();   // 更长窗口，分数更稳
   let s = 0; for (const x of q) s += x;
   return s / q.length;
 }
@@ -827,8 +819,6 @@ function drawFanUI(apex, tips, t) {
   sctx.shadowColor = 'rgba(255,92,200,1)'; sctx.shadowBlur = 32;
   sctx.fillStyle = 'rgba(255,92,200,.98)';
   sctx.beginPath(); sctx.arc(apex.x, apex.y, 12, 0, Math.PI * 2); sctx.fill();
-  sctx.strokeStyle = 'rgba(180,245,255,.95)'; sctx.lineWidth = 2.6;
-  sctx.beginPath(); sctx.arc(apex.x, apex.y, 21, 0, Math.PI * 2); sctx.stroke();
   sctx.shadowBlur = 0;
 
   // 五个指尖节点
@@ -838,8 +828,6 @@ function drawFanUI(apex, tips, t) {
     sctx.shadowColor = 'rgba(255,92,200,1)'; sctx.shadowBlur = 20;
     sctx.beginPath(); sctx.arc(q.x, q.y, 6, 0, Math.PI * 2); sctx.fill();
     sctx.shadowBlur = 0;
-    sctx.strokeStyle = 'rgba(57,230,255,.9)'; sctx.lineWidth = 2;
-    sctx.beginPath(); sctx.arc(q.x, q.y, 11, 0, Math.PI * 2); sctx.stroke();
   }
 
   // 二进制数字反馈
@@ -1320,7 +1308,7 @@ function smoothLandmarks(list, t) {
 
 /* ---------- 稳定性：状态锁 + 丢帧计数 ---------- */
 /* 每种模式的最小保持时间（ms），防止快速切换造成闪烁 */
-const MIN_HOLD = { fan: 150, rect: 150, point: 120, idle: 60 };
+const MIN_HOLD = { fan: 350, rect: 250, point: 150, idle: 80 };
 let modeSince = 0;          // 当前模式进入时间
 let missCount = 0;          // 连续未命中期望模式的帧数
 
@@ -1349,7 +1337,7 @@ function onHands(list) {
   if (!list.length) {
     // 丢帧容忍：短暂丢手不清状态，避免画面闪断
     missCount++;
-    if (missCount > 4 && now - lastSeen > 150) {
+    if (missCount > 10 && now - lastSeen > 300) {
       enterMode('idle');
       targetReveal = 0; reveal = 0;
       targetFull = 0; fullMix = 0;
@@ -1375,7 +1363,7 @@ function onHands(list) {
       return { i, c, s };
     });
     // 攥拳手：攥拳分最高且达到阈值（已在扇形时放宽）
-    const relax = (mode === 'fan') ? 0.30 : 0;
+    const relax = (mode === 'fan') ? 0.45 : 0;   // 已在扇形时大幅放宽
     const clNeed = CLENCH_ON - relax;
     for (const sc of scores) {
       if (sc.c >= clNeed && sc.c >= sc.s && sc.c > bestCl) { bestCl = sc.c; ci = sc.i; }
@@ -1400,13 +1388,13 @@ function onHands(list) {
       fanLastTri = fanTriangles;
       // 已处于扇形时：直接维持，不再要求重新确认（避免转动时断续）
       if (mode === 'fan') {
-        fanHoldFrames = 12;
+        fanHoldFrames = 30;
         setState('FAN / 4 三角形滤镜', '攥拳成点 · 另一手五指张开 → 4 个滤镜三角形', 'live');
         return;
       }
       if (confirmMode('fan') && canSwitch('fan')) {
         enterMode('fan');
-        fanHoldFrames = 12;
+        fanHoldFrames = 30;
         pointPos = null; smoothRect = null; liveQuad = null;
         targetReveal = 0; targetFull = 0;
         setState('FAN / 4 三角形滤镜', '攥拳成点 · 另一手五指张开 → 4 个滤镜三角形', 'live');
